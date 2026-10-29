@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.0 du 29/10/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.1 du 29/10/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque,
   puis renvoyer au Mac un petit fichier chiffré que MyFinance intègre tout seul.
@@ -370,11 +370,21 @@ async function copyFallback() { const t = $('fallback'); if (!t) return; try { a
 
 // ---------- Affichage ----------
 function go(v) { view = v; formOpen = false; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
-function setSel(m, on) { on ? monthSel.add(m) : monthSel.delete(m); const t = $('t-amount'); if (t) t.value = selTotal(); renderTotal(); }
+function setSel(m, on) { on ? monthSel.add(m) : monthSel.delete(m); const t = $('t-amount'); if (t) { t.value = selTotal() || ''; renderTotal(); } else render(); }
 function selTotal() { return (data.months || []).filter(m => monthSel.has(m.month)).reduce((s, m) => s + (m.pending || 0), 0); }
 function renderTotal() { const e = $('sel-total'); if (e) e.textContent = eur(selTotal()); }
 function accountOptions(sel, filter) { return (data.accounts || []).filter(filter).map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)} — ${esc(a.bank)}${a.num ? ' …' + esc(a.num) : ''}</option>`).join(''); }
 
+// Formulaire de virement (montant pré-rempli avec le total des mois cochés ; vide si aucun mois)
+function openForm() { formOpen = true; render(); setTimeout(() => { const a = $('t-amount'); if (a) a.focus(); }, 50); }
+function transferForm(p) { return `<form class="panel" style="border-style:dashed" onsubmit="addTransfer(event)">
+      <div class="row"><label class="field">Date du virement<input id="t-date" type="date" value="${today()}" required></label>
+      <label class="field">Montant (€)<input id="t-amount" type="text" inputmode="decimal" value="${selTotal() || ''}" required></label></div>
+      <label class="field">Depuis<select id="t-from">${accountOptions(p.from, a => a.current)}</select></label>
+      <label class="field">Vers<select id="t-to">${accountOptions(p.to, a => !a.current && !a.debt)}</select></label>
+      <label class="field">Note (facultatif)<input id="t-note" type="text" placeholder="ex. septembre + octobre"></label>
+      <div class="row"><button type="button" class="btn-ghost" onclick="formOpen=false;render()">Annuler</button><button type="submit" class="btn-primary">Noter ce virement</button></div>
+    </form>`; }
 function viewMonth() {
   if (!data) return viewFile();
   const months = data.months || [], todo = months.filter(m => !m.done && !m.missing && m.pending > 0), missing = months.filter(m => m.missing);
@@ -396,15 +406,9 @@ function viewMonth() {
     <div>${todo.map(m => `<div class="month"><input type="checkbox" id="m-${esc(m.month)}" ${monthSel.has(m.month) ? 'checked' : ''} onchange="setSel('${esc(m.month)}', this.checked)" aria-label="${esc(m.label)}">
       <label for="m-${esc(m.month)}"><b>${esc(m.label)}</b></label><span class="money">${eur(m.pending)}</span>
       ${(m.envelopes || []).length ? `<span class="env">${m.envelopes.map(e => `${esc(e.name)} ${eur(e.amount)}`).join(' · ')}</span>` : ''}</div>`).join('')}</div>
-    ${formOpen ? `<form class="panel" style="border-style:dashed" onsubmit="addTransfer(event)">
-      <div class="row"><label class="field">Date du virement<input id="t-date" type="date" value="${today()}" required></label>
-      <label class="field">Montant (€)<input id="t-amount" type="text" inputmode="decimal" value="${selTotal()}" required></label></div>
-      <label class="field">Depuis<select id="t-from">${accountOptions(p.from, a => a.current)}</select></label>
-      <label class="field">Vers<select id="t-to">${accountOptions(p.to, a => !a.current && !a.debt)}</select></label>
-      <label class="field">Note (facultatif)<input id="t-note" type="text" placeholder="ex. septembre + octobre"></label>
-      <div class="row"><button type="button" class="btn-ghost" onclick="formOpen=false;render()">Annuler</button><button type="submit" class="btn-primary">Noter ce virement</button></div>
-    </form>` : `<button class="btn-primary" onclick="formOpen=true;render();setTimeout(()=>{const a=$('t-amount');a&&a.focus()},50)" ${monthSel.size ? '' : 'disabled'}>J'ai fait le virement de ${eur(selTotal())}</button>`}
-  </div>` : `<div class="banner ok">✓ Tous les virements de provisions sont faits.</div>`}
+    ${formOpen ? transferForm(p) : `<button class="btn-primary" onclick="openForm()">${monthSel.size ? `J'ai fait le virement de ${eur(selTotal())}` : 'Noter un virement (sans mois)'}</button>`}
+  </div>` : `<div class="banner ok">✓ Tous les mois sont déjà marqués « virement fait » sur le Mac. Vous pouvez quand même noter un virement ci-dessous.</div>
+  ${formOpen ? transferForm(p) : `<button class="btn-primary" onclick="openForm()">Noter un virement</button>`}`}
   <div class="panel"><h2>Mois par mois</h2><div class="list">${months.map(m => `<div><span class="name"><b>${esc(m.label)}</b>${(m.transfers || []).length ? `<span class="small muted"> · ${m.transfers.map(t => `${dfr(t.date)} ${esc(accName(t.from))} → ${esc(accName(t.to))}`).join(' · ')}</span>` : ''}</span>
     <span>${m.missing ? '<span class="chip bad">manquant</span>' : m.done ? '<span class="chip ok">✓ viré</span>' : `<span class="chip warn">${eur(m.pending)} à virer</span>`}</span></div>`).join('') || '<div class="muted">Aucun mois.</div>'}</div></div>
   <div class="panel"><h2>Derniers virements</h2><div class="list">${(data.transfers || []).slice(0, 12).map(t => `<div><span class="name">${dfr(t.date)} · ${esc(accName(t.from))} → ${esc(accName(t.to))}${t.provisions ? ' <span class="chip info">provisions</span>' : ''}</span><span class="money">${eur(t.amount)}</span></div>`).join('') || '<div class="muted">Aucun virement récent.</div>'}</div></div>`;
@@ -461,7 +465,7 @@ function viewFile() {
   <div class="panel small muted"><b style="color:var(--ink)">Comment ça marche</b>
     <ol style="margin:0;padding-left:1.2rem;display:grid;gap:4px">
       <li>Le Mac écrit le fichier (MyFinance ouvert : automatiquement, ou bouton « 📱 Mettre à jour l'iPhone »).</li>
-      <li>Ici, « Ce mois » : cochez les mois virés, puis « J'ai fait le virement ».</li>
+      <li>Ici, « Ce mois » : cochez les mois virés, puis « J'ai fait le virement » (ou « Noter un virement » si tout est déjà coché sur le Mac).</li>
       <li>« Envoyer » : enregistrez le fichier retour dans le même dossier OneDrive.</li>
       <li>Le Mac l'intègre : la case « Virement fait » du mois se coche.</li>
     </ol>
@@ -469,7 +473,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.0 du 29/10/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.1 du 29/10/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
