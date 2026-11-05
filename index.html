@@ -1,8 +1,9 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.1 du 29/10/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.2 du 05/11/2026)
   ------------------------------------------------------------------------------------
-  Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque,
+  Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
+  enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
   puis renvoyer au Mac un petit fichier chiffré que MyFinance intègre tout seul.
 
   Fonctionnement :
@@ -88,6 +89,7 @@ button:disabled { opacity: .45; cursor: default }
 .month input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent) }
 .env { font-size: .78rem; color: var(--muted); grid-column: 2 / -1 }
 label.field { display: grid; gap: 4px; font-size: .82rem; font-weight: 600; color: var(--muted) }
+div.field { display: grid; gap: 4px; font-size: .82rem; font-weight: 600; color: var(--muted) }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; width: 100%; min-width: 0 }
 .list { display: grid } .list > div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); align-items: baseline } .list > div:first-child { border-top: 0 }
 .list .name { min-width: 0; overflow-wrap: anywhere }
@@ -97,7 +99,7 @@ input, select, textarea { font: inherit; color: var(--ink); background: var(--pa
 .banner.ok { background: var(--ok-soft); color: var(--ok) }
 .banner.bad { background: var(--bad-soft); color: var(--bad) }
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--card); border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); padding-top: 6px }
 .tabs button { border: 0; background: transparent; padding: 6px 2px; font-size: .74rem; color: var(--muted); display: grid; gap: 2px; justify-items: center; position: relative }
 .tabs button[aria-selected="true"] { color: var(--accent) }
@@ -124,6 +126,7 @@ textarea.code { min-height: 120px }
   <button role="tab" id="tab-month" aria-selected="true" onclick="go('month')"><span class="ico">€</span>Ce mois</button>
   <button role="tab" id="tab-queue" aria-selected="false" onclick="go('queue')"><span class="ico">↗</span>Envoyer<span id="q-badge" class="badge" hidden></span></button>
   <button role="tab" id="tab-accounts" aria-selected="false" onclick="go('accounts')"><span class="ico">≡</span>Comptes</button>
+  <button role="tab" id="tab-bourse" aria-selected="false" onclick="go('bourse')"><span class="ico">↗︎</span>Bourse</button>
   <button role="tab" id="tab-file" aria-selected="false" onclick="go('file')"><span class="ico">⇩</span>Fichier</button>
 </nav>
 
@@ -135,7 +138,7 @@ const EXAMPLE = { type: 'myfinance-mobile', generatedAt: '2026-10-29T18:00:00Z',
     { id: 'a2', name: 'LDD Pascal', bank: 'BoursoBank', current: false, liquid: true, balance: 11850, num: '01352' },
     { id: 'a3', name: 'Livret Bourso+', bank: 'BoursoBank', current: false, liquid: true, balance: 8030, num: '04478' }],
   plan: { from: 'a1', to: 'a2', day: 8, total: 830, lines: [{ name: 'Impôts', amount: 120 }, { name: 'Voitures', amount: 125 }, { name: 'Piscine', amount: 200 }, { name: 'Vacances', amount: 185 }, { name: 'Taxe foncière', amount: 200 }] },
-  envelopes: [{ name: 'Impôts', monthly: 120, balance: 1320 }, { name: 'Voitures', monthly: 125, balance: 940 }, { name: 'Piscine', monthly: 200, balance: 1600 }, { name: 'Vacances', monthly: 185, balance: 2080 }, { name: 'Taxe foncière', monthly: 200, balance: 1500 }],
+  envelopes: [{ id: 'p1', name: 'Impôts', monthly: 120, balance: 1320 }, { id: 'p2', name: 'Voitures', monthly: 125, balance: 940 }, { name: 'Piscine', monthly: 200, balance: 1600 }, { name: 'Vacances', monthly: 185, balance: 2080 }, { name: 'Taxe foncière', monthly: 200, balance: 1500 }],
   totals: { provisions: 7440, transit: 1660, gapOpen: 0 },
   months: [
     { month: '2026-10', label: 'Octobre 2026', total: 830, done: false, missing: false, pending: 830, envelopes: [{ name: 'Impôts', amount: 120 }, { name: 'Voitures', amount: 125 }, { name: 'Piscine', amount: 200 }, { name: 'Vacances', amount: 185 }, { name: 'Taxe foncière', amount: 200 }], transfers: [] },
@@ -146,7 +149,7 @@ const EXAMPLE = { type: 'myfinance-mobile', generatedAt: '2026-10-29T18:00:00Z',
   applied: [] };
 
 // ---------- État ----------
-let data = EXAMPLE, envText = null, dek = null, encrypted = false, queue = [], view = 'month', notice = null, monthSel = new Set(), formOpen = false, confirmClear = false;
+let data = EXAMPLE, envText = null, dek = null, encrypted = false, queue = [], view = 'month', notice = null, monthSel = new Set(), formOpen = false, useOpen = false, confirmClear = false;
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const eur = n => (Number(n) || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
@@ -325,6 +328,39 @@ async function addTransfer(ev) {
   formOpen = false; notice = { kind: 'ok', text: `Virement de ${eur(amount)} noté. Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
   render();
 }
+// Utiliser une provision : virement de l'épargne vers le compte courant, enveloppes débitées
+const num = v => { const n = Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(n) ? n : 0; };
+function useLinesTotal() { return Math.round((data.envelopes || []).reduce((s, e, i) => s + Math.max(0, num(($('u-e' + i) || {}).value)), 0) * 100) / 100; }
+function useSync() { const t = useLinesTotal(), a = $('u-amount'); if (a && (!a.dataset.touched || !num(a.value))) a.value = t ? String(t).replace('.', ',') : ''; const x = $('u-total'); if (x) x.textContent = eur(t); }
+async function addUse(ev) {
+  ev.preventDefault();
+  if (exampleGuard()) return;
+  const lines = (data.envelopes || []).map((e, i) => ({ id: e.id, name: e.name, amount: Math.round(Math.max(0, num(($('u-e' + i) || {}).value)) * 100) / 100 })).filter(l => l.amount > 0);
+  const amount = num($('u-amount').value);
+  const it = { id: newId(), type: 'use', date: $('u-date').value, amount, from: $('u-from').value, to: $('u-to').value, lines, note: $('u-note').value.trim(), createdAt: new Date().toISOString() };
+  if (!(amount > 0) || !it.date || !it.from || !it.to || it.from === it.to) { notice = { kind: 'bad', text: 'Vérifiez le montant, la date et les deux comptes (différents).' }; render(); return; }
+  if (!lines.length) { notice = { kind: 'bad', text: 'Indiquez au moins une enveloppe à débiter (montant).' }; render(); return; }
+  const over = lines.filter(l => { const e = (data.envelopes || []).find(x => x.id === l.id); return e && l.amount > e.balance + 0.005; });
+  if (over.length && !confirm(`${over.map(l => l.name).join(', ')} : le montant dépasse le solde de l'enveloppe, qui deviendra négative. Continuer ?`)) return;
+  queue.push(it); await saveQueue();
+  useOpen = false; notice = { kind: 'ok', text: `Utilisation de ${eur(amount)} notée (${lines.map(l => l.name + ' ' + eur(l.amount)).join(' · ')}). Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
+  render();
+}
+function useForm() {
+  const envs = data.envelopes || [];
+  const sav = (data.accounts || []).filter(a => !a.current && !a.debt && a.liquid !== false), cur = (data.accounts || []).filter(a => a.current);
+  const p = data.plan || {};
+  return `<form class="panel" style="border-style:dashed" onsubmit="addUse(event)">
+      <div class="row"><label class="field">Date du virement<input id="u-date" type="date" value="${today()}" required></label>
+      <label class="field">Montant viré (€)<input id="u-amount" type="text" inputmode="decimal" oninput="this.dataset.touched=1" required></label></div>
+      <label class="field">Depuis (épargne)<select id="u-from">${sav.map(a => `<option value="${esc(a.id)}" ${a.id === p.to ? 'selected' : ''}>${esc(a.name)} — ${esc(a.bank)}${a.num ? ' …' + esc(a.num) : ''}</option>`).join('')}</select></label>
+      <label class="field">Vers (compte courant)<select id="u-to">${cur.map(a => `<option value="${esc(a.id)}" ${a.id === p.from ? 'selected' : ''}>${esc(a.name)} — ${esc(a.bank)}${a.num ? ' …' + esc(a.num) : ''}</option>`).join('')}</select></label>
+      <div class="field">Enveloppes à débiter <span class="small muted">(total <b id="u-total">0,00 €</b>)</span>
+        <div class="list">${envs.map((e, i) => `<div><span class="name">${esc(e.name)}<span class="small muted"> · solde ${eur(e.balance)}</span></span><input id="u-e${i}" type="text" inputmode="decimal" placeholder="0" oninput="useSync()" style="width:6.5rem;text-align:right"></div>`).join('') || '<div class="muted">Aucune enveloppe dans le fichier du Mac.</div>'}</div></div>
+      <label class="field">Pour quoi (facultatif)<input id="u-note" type="text" placeholder="ex. taxe foncière, révision voiture"></label>
+      <div class="row"><button type="button" class="btn-ghost" onclick="useOpen=false;render()">Annuler</button><button type="submit" class="btn-primary">Noter cette utilisation</button></div>
+    </form>`;
+}
 async function addRecordMonth(m) { if (exampleGuard()) return; queue.push({ id: newId(), type: 'recordMonth', month: m, createdAt: new Date().toISOString() }); await saveQueue(); notice = { kind: 'ok', text: 'Provisions du mois notées : envoyez-les au Mac.' }; render(); }
 async function removeItem(id) { queue = queue.filter(i => i.id !== id); await saveQueue(); render(); }
 async function clearQueue() { queue = []; confirmClear = false; await saveQueue(); notice = { kind: 'ok', text: 'Liste vidée.' }; render(); }
@@ -369,7 +405,7 @@ async function sendToMac() {
 async function copyFallback() { const t = $('fallback'); if (!t) return; try { await navigator.clipboard.writeText(t.value); notice = { kind: 'ok', text: 'Copié.' }; } catch (e) { t.select(); } render(); }
 
 // ---------- Affichage ----------
-function go(v) { view = v; formOpen = false; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
+function go(v) { view = v; formOpen = false; useOpen = false; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
 function setSel(m, on) { on ? monthSel.add(m) : monthSel.delete(m); const t = $('t-amount'); if (t) { t.value = selTotal() || ''; renderTotal(); } else render(); }
 function selTotal() { return (data.months || []).filter(m => monthSel.has(m.month)).reduce((s, m) => s + (m.pending || 0), 0); }
 function renderTotal() { const e = $('sel-total'); if (e) e.textContent = eur(selTotal()); }
@@ -409,6 +445,10 @@ function viewMonth() {
     ${formOpen ? transferForm(p) : `<button class="btn-primary" onclick="openForm()">${monthSel.size ? `J'ai fait le virement de ${eur(selTotal())}` : 'Noter un virement (sans mois)'}</button>`}
   </div>` : `<div class="banner ok">✓ Tous les mois sont déjà marqués « virement fait » sur le Mac. Vous pouvez quand même noter un virement ci-dessous.</div>
   ${formOpen ? transferForm(p) : `<button class="btn-primary" onclick="openForm()">Noter un virement</button>`}`}
+  <div class="panel"><div class="top"><h2>Utiliser une provision</h2></div>
+    <p class="small muted">Vous avez viré de l'argent de l'épargne vers le compte courant pour payer une dépense provisionnée ? Notez-le ici : le Mac enregistrera le virement et débitera les enveloppes choisies.</p>
+    ${useOpen ? useForm() : `<button class="btn-primary" onclick="${data && data.example ? 'exampleGuard()' : 'useOpen=true;formOpen=false;render();setTimeout(useSync,30)'}">Utiliser une provision</button>`}
+  </div>
   <div class="panel"><h2>Mois par mois</h2><div class="list">${months.map(m => `<div><span class="name"><b>${esc(m.label)}</b>${(m.transfers || []).length ? `<span class="small muted"> · ${m.transfers.map(t => `${dfr(t.date)} ${esc(accName(t.from))} → ${esc(accName(t.to))}`).join(' · ')}</span>` : ''}</span>
     <span>${m.missing ? '<span class="chip bad">manquant</span>' : m.done ? '<span class="chip ok">✓ viré</span>' : `<span class="chip warn">${eur(m.pending)} à virer</span>`}</span></div>`).join('') || '<div class="muted">Aucun mois.</div>'}</div></div>
   <div class="panel"><h2>Derniers virements</h2><div class="list">${(data.transfers || []).slice(0, 12).map(t => `<div><span class="name">${dfr(t.date)} · ${esc(accName(t.from))} → ${esc(accName(t.to))}${t.provisions ? ' <span class="chip info">provisions</span>' : ''}</span><span class="money">${eur(t.amount)}</span></div>`).join('') || '<div class="muted">Aucun virement récent.</div>'}</div></div>`;
@@ -416,7 +456,7 @@ function viewMonth() {
 function viewQueue() {
   if (!data) return viewFile();
   return `<div class="panel"><div class="top"><h2>À envoyer au Mac</h2><span class="chip ${queue.length ? 'warn' : 'ok'}">${queue.length} élément(s)</span></div>
-    <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
+    <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
       <button class="btn-ghost btn-danger" style="padding:6px 10px" onclick="removeItem('${esc(i.id)}')" aria-label="Retirer">Retirer</button></div>`).join('') || '<div class="muted">Rien à envoyer. Notez un virement dans « Ce mois ».</div>'}</div>
     <button class="btn-primary" onclick="sendToMac()" ${queue.length ? '' : 'disabled'}>Envoyer au Mac (fichier pour OneDrive)</button>
     <p class="small muted">Dans la feuille de partage : « Enregistrer dans Fichiers » › Parcourir › OneDrive › … › Banques › MyFinance › <b>iPhone</b>. Le Mac lit ce dossier toutes les 2 minutes quand MyFinance est ouvert.</p>
@@ -435,6 +475,36 @@ function viewAccounts() {
     ${t.transit ? `<p class="small muted">Dont ${eur(t.transit)} pas encore virés sur l'épargne.</p>` : ''}</div>
     <div class="panel"><h2>Comptes</h2>${Object.keys(byBank).sort().map(b => `<div><div class="eyebrow">${esc(b)}</div><div class="list">${byBank[b].map(a => `<div><span class="name">${esc(a.name)}${a.num ? `<span class="small muted"> …${esc(a.num)}</span>` : ''}</span><span class="money" style="color:${a.balance < 0 ? 'var(--bad)' : 'inherit'}">${eur(a.balance)}</span></div>`).join('')}</div></div>`).join('')}</div>
     ${(data.scpis || []).length ? `<div class="panel"><h2>SCPI</h2><div class="list">${data.scpis.map(s => `<div><span class="name">${esc(s.name)}<span class="small muted"> · ${s.parts} parts</span></span><span class="money" style="color:${s.value < s.invested ? 'var(--bad)' : s.value > s.invested ? 'var(--ok)' : 'inherit'}">${eur(s.value)}</span></div>`).join('')}</div></div>` : ''}`;
+}
+// ---------- Bourse : plan d'action et stops calculés sur le Mac (lecture seule ; les ordres se passent dans IBKR Mobile) ----------
+const pct = x => x == null ? '—' : (x * 100).toFixed(1).replace('.', ',') + ' %';
+const n2 = x => x == null ? '—' : Number(x).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+function ibLink(u) { return u ? `<a href="${esc(u)}" target="_blank" rel="noopener" class="small">Voir dans IBKR ↗</a>` : ''; }
+function viewBourse() {
+  if (!data) return viewFile();
+  const B = data.bourse;
+  if (!B) return `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Analyser » dans MyFinance (onglet Bourse IBKR) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
+  const age = Math.round((Date.now() - new Date(B.at).getTime()) / 3600000);
+  const actChip = k => k === 'vendre' || k === 'alleger' ? 'bad' : k === 'renforcer' ? 'ok' : 'info';
+  const pos = (B.positions || []).map(p => `<div class="panel" style="padding:12px">
+      <div class="top"><h2 style="font-size:1rem">${esc(p.symbol)} <span class="small muted">${esc(p.name)}</span></h2><span class="chip ${actChip(p.actionKind)}">${esc(p.action)}</span></div>
+      <div class="small">${n2(p.price)} ${esc(p.cur)} · poids ${pct(p.weight)} · ${p.lat == null ? '' : (p.lat >= 0 ? '+' : '') + pct(p.lat) + ' · '}note ${p.note == null ? '—' : n2(p.note)}/10 · ${esc(String(p.qty))} titre(s)</div>
+      ${p.qtyText ? `<div class="small"><b>${esc(p.qtyText)}</b></div>` : ''}
+      <div class="small">Stop suiveur conseillé : <b>Suiveur ${pct(p.trail)}</b>${p.level ? ` → stop à ${n2(p.level)} ${esc(p.cur)} si posé maintenant` : ''}</div>
+      <div class="small" style="color:${p.stopOk ? 'var(--ok)' : 'var(--warn)'}">${esc(p.stopAdvice)}</div>
+      ${(p.calc || []).length ? `<div class="small muted">${p.calc.map(esc).join('<br>')}</div>` : ''}
+      ${(p.notes || []).length ? `<div class="small" style="color:var(--warn)">${p.notes.map(esc).join(' · ')}</div>` : ''}
+      ${ibLink(p.url)}</div>`).join('');
+  const sim = (L, title, sub) => `<div class="panel"><h2>${title}</h2><p class="small muted">${sub}</p><div class="list">${(L || []).map((a, i) => `<div style="display:block"><b>${i + 1}. ${esc(a.action)} · ${esc(a.symbol)}</b> <span class="small muted">${esc(a.name)}${a.note != null ? ' · note ' + n2(a.note) : ''}</span>
+      <div class="small">${esc(a.why)}</div><div class="small"><b>${esc(a.order)}</b></div>${ibLink(a.url)}</div>`).join('') || '<div class="muted small">Aucune action aujourd\'hui.</div>'}</div></div>`;
+  const notes = Object.entries(B.notes || {});
+  return `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(String(B.at).slice(0, 10))} à ${String(B.at).slice(11, 16)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule : passez les ordres dans IBKR Mobile.</div>
+    <div class="panel"><h2>Mes positions : stops et actions</h2><p class="small muted">L'écart d'un stop suiveur se compte depuis le plus haut atteint après la pose de l'ordre, pas depuis votre prix d'achat. « Suiveur » sur l'iPhone = « Trail » sur le PC.</p></div>
+    ${pos || '<div class="panel small muted">Aucune position.</div>'}
+    ${sim(B.eq, '1 · Équilibre du portefeuille', `Ventes ou allègements d'abord, puis achats là où vous êtes peu exposé. Budget ${eur(B.budget)}.`)}
+    ${sim(B.opp, '2 · Opportunités du moment', '« maintenant » : ordre Limite au cours (Jour) ; « sur repli » : ordre Limite sous le cours (jusqu\'à annulation).')}
+    ${notes.length ? `<div class="panel"><h2>Notes du carnet</h2>${notes.map(([sym, l]) => `<details><summary><b>${esc(sym)}</b> <span class="small muted">${l.length} note(s)</span></summary>${l.map(e => `<div class="small" style="margin:6px 0"><b>${dfr(e.date)}</b> · ${esc(e.type)} · ${esc(e.title)}<br><span class="muted">${esc(e.text)}</span></div>`).join('')}</details>`).join('')}</div>` : ''}
+    <p class="small muted">Calculs automatiques, pas des conseils personnalisés. Vérifiez cours et devise dans IBKR avant tout ordre.</p>`;
 }
 function viewFile() {
   const cached = store.get('mf-mobile-file');
@@ -473,16 +543,16 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.1 du 29/10/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.2 du 05/11/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
   if (data && data.example) { chip.className = 'chip warn'; chip.textContent = 'Exemple'; }
   else if (data) { chip.className = 'chip ok'; chip.textContent = 'Données du ' + dfr((data.generatedAt || '').slice(0, 10)); }
   else { chip.className = 'chip info'; chip.textContent = encrypted ? 'Verrouillé' : 'Aucun fichier'; }
-  ['month', 'queue', 'accounts', 'file'].forEach(v => $('tab-' + v).setAttribute('aria-selected', String(v === view)));
+  ['month', 'queue', 'accounts', 'bourse', 'file'].forEach(v => $('tab-' + v).setAttribute('aria-selected', String(v === view)));
   const qb = $('q-badge'); qb.hidden = !queue.length; qb.textContent = queue.length;
-  const body = view === 'queue' ? viewQueue() : view === 'accounts' ? viewAccounts() : view === 'file' ? viewFile() : viewMonth();
+  const body = view === 'queue' ? viewQueue() : view === 'accounts' ? viewAccounts() : view === 'bourse' ? viewBourse() : view === 'file' ? viewFile() : viewMonth();
   $('view').innerHTML = (data && data.example ? `<div class="banner example">Exemple : ces chiffres sont fictifs. Ouvrez votre fichier dans l'onglet « Fichier ».</div>` : '')
     + (notice ? `<div class="banner ${notice.kind}" role="status">${esc(notice.text)}</div>` : '') + body;
 }
