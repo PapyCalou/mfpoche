@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.2 du 05/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.3 du 06/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -322,10 +322,14 @@ async function addTransfer(ev) {
   ev.preventDefault();
   if (exampleGuard()) return;
   const amount = Number(String($('t-amount').value).replace(/\s/g, '').replace(',', '.'));
-  const it = { id: newId(), type: 'transfer', date: $('t-date').value, amount, from: $('t-from').value, to: $('t-to').value, months: [...monthSel], note: $('t-note').value.trim(), createdAt: new Date().toISOString() };
+  const lines = (data.envelopes || []).map((e, i) => ({ id: e.id, name: e.name, amount: Math.round(Math.max(0, num(($('t-e' + i) || {}).value)) * 100) / 100 })).filter(l => l.id && l.amount > 0);
+  const it = { id: newId(), type: 'transfer', date: $('t-date').value, amount, from: $('t-from').value, to: $('t-to').value, months: [...monthSel], lines, note: $('t-note').value.trim(), createdAt: new Date().toISOString() };
   if (!(amount > 0) || !it.date || !it.from || !it.to || it.from === it.to) { notice = { kind: 'bad', text: 'Vérifiez le montant, la date et les deux comptes (différents).' }; render(); return; }
+  const used = Math.round((selTotal() + lines.reduce((s, l) => s + l.amount, 0)) * 100) / 100;
+  if (used > amount + 0.005) { notice = { kind: 'bad', text: `Mois cochés et enveloppes (${eur(used)}) dépassent le montant viré (${eur(amount)}).` }; render(); return; }
+  if (!monthSel.size && !lines.length && !confirm("Aucun mois coché ni aucune enveloppe : le Mac vous demandera à quelle enveloppe affecter ce virement. Continuer ?")) return;
   queue.push(it); await saveQueue();
-  formOpen = false; notice = { kind: 'ok', text: `Virement de ${eur(amount)} noté. Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
+  formOpen = false; notice = { kind: 'ok', text: `Virement de ${eur(amount)} noté${lines.length ? ` (${lines.map(l => l.name + ' ' + eur(l.amount)).join(' · ')})` : ''}. Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
   render();
 }
 // Utiliser une provision : virement de l'épargne vers le compte courant, enveloppes débitées
@@ -412,12 +416,16 @@ function renderTotal() { const e = $('sel-total'); if (e) e.textContent = eur(se
 function accountOptions(sel, filter) { return (data.accounts || []).filter(filter).map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)} — ${esc(a.bank)}${a.num ? ' …' + esc(a.num) : ''}</option>`).join(''); }
 
 // Formulaire de virement (montant pré-rempli avec le total des mois cochés ; vide si aucun mois)
+// Montant proposé = mois cochés + enveloppes saisies (tant que l'utilisateur n'a pas tapé le montant lui-même)
+function tEnvSync() { const a = $('t-amount'); if (!a || a.dataset.touched) return; const t = Math.round((selTotal() + (data.envelopes || []).reduce((s, e, i) => s + Math.max(0, num(($('t-e' + i) || {}).value)), 0)) * 100) / 100; a.value = t ? String(t).replace('.', ',') : ''; }
 function openForm() { formOpen = true; render(); setTimeout(() => { const a = $('t-amount'); if (a) a.focus(); }, 50); }
 function transferForm(p) { return `<form class="panel" style="border-style:dashed" onsubmit="addTransfer(event)">
       <div class="row"><label class="field">Date du virement<input id="t-date" type="date" value="${today()}" required></label>
-      <label class="field">Montant (€)<input id="t-amount" type="text" inputmode="decimal" value="${selTotal() || ''}" required></label></div>
+      <label class="field">Montant (€)<input id="t-amount" type="text" inputmode="decimal" value="${selTotal() || ''}" oninput="this.dataset.touched=1" required></label></div>
       <label class="field">Depuis<select id="t-from">${accountOptions(p.from, a => a.current)}</select></label>
       <label class="field">Vers<select id="t-to">${accountOptions(p.to, a => !a.current && !a.debt)}</select></label>
+      ${(data.envelopes || []).length ? `<div class="field">Enveloppes à créditer <span class="small muted">(virement hors plan mensuel, ou en plus des mois cochés)</span>
+        <div class="list">${data.envelopes.map((e, i) => `<div><span class="name">${esc(e.name)}<span class="small muted"> · solde ${eur(e.balance)}</span></span><input id="t-e${i}" type="text" inputmode="decimal" placeholder="0" oninput="tEnvSync()" style="width:6.5rem;text-align:right"></div>`).join('')}</div></div>` : ''}
       <label class="field">Note (facultatif)<input id="t-note" type="text" placeholder="ex. septembre + octobre"></label>
       <div class="row"><button type="button" class="btn-ghost" onclick="formOpen=false;render()">Annuler</button><button type="submit" class="btn-primary">Noter ce virement</button></div>
     </form>`; }
@@ -456,7 +464,7 @@ function viewMonth() {
 function viewQueue() {
   if (!data) return viewFile();
   return `<div class="panel"><div class="top"><h2>À envoyer au Mac</h2><span class="chip ${queue.length ? 'warn' : 'ok'}">${queue.length} élément(s)</span></div>
-    <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
+    <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${(i.lines || []).length ? ' · ' + i.lines.map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
       <button class="btn-ghost btn-danger" style="padding:6px 10px" onclick="removeItem('${esc(i.id)}')" aria-label="Retirer">Retirer</button></div>`).join('') || '<div class="muted">Rien à envoyer. Notez un virement dans « Ce mois ».</div>'}</div>
     <button class="btn-primary" onclick="sendToMac()" ${queue.length ? '' : 'disabled'}>Envoyer au Mac (fichier pour OneDrive)</button>
     <p class="small muted">Dans la feuille de partage : « Enregistrer dans Fichiers » › Parcourir › OneDrive › … › Banques › MyFinance › <b>iPhone</b>. Le Mac lit ce dossier toutes les 2 minutes quand MyFinance est ouvert.</p>
@@ -543,7 +551,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.2 du 05/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.3 du 06/11/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
