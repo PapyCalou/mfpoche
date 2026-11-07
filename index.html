@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.4 du 06/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.4.1 du 07/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -491,7 +491,7 @@ function ibLink(u) { return u ? `<a href="${esc(u)}" target="_blank" rel="noopen
 function viewBourse() {
   if (!data) return viewFile();
   const B = data.bourse;
-  if (!B) return `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Analyser » dans MyFinance (onglet Bourse IBKR) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
+  if (!B) return `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Analyser » dans MyFinance (onglet Bourse) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
   const age = Math.round((Date.now() - new Date(B.at).getTime()) / 3600000);
   const actChip = k => k === 'vendre' || k === 'alleger' ? 'bad' : k === 'renforcer' ? 'ok' : 'info';
   const pos = (B.positions || []).map(p => `<div class="panel" style="padding:12px">
@@ -519,7 +519,7 @@ function viewBourse() {
     ${sim(B.eq, '1 · Équilibre du portefeuille', `Ventes ou allègements d'abord, puis achats là où vous êtes peu exposé. Budget ${eur(B.budget)}.`)}
     ${sim(B.opp, '2 · Opportunités du moment', '« maintenant » : ordre Limite au cours (Jour) ; « sur repli » : ordre Limite sous le cours (jusqu\'à annulation).')}
     ${notes.length ? `<div class="panel"><h2>Notes du carnet</h2>${notes.map(([sym, l]) => `<details><summary><b>${esc(sym)}</b> <span class="small muted">${l.length} note(s)</span></summary>${l.map(e => `<div class="small" style="margin:6px 0"><b>${dfr(e.date)}</b> · ${esc(e.type)} · ${esc(e.title)}<br><span class="muted">${esc(e.text)}</span></div>`).join('')}</details>`).join('')}</div>` : ''}
-    <p class="small muted">Calculs automatiques, pas des conseils personnalisés. Vérifiez cours et devise dans IBKR avant tout ordre.</p>`;
+    <p class="small muted">Calculs automatiques, pas des conseils personnalisés. Vérifiez cours et devise chez votre courtier avant tout ordre.</p>`;
 }
 function viewFile() {
   const cached = store.get('mf-mobile-file');
@@ -558,7 +558,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.4 du 06/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.4.1 du 07/11/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
