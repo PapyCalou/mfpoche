@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.4.1 du 07/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.5.0 du 08/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -126,7 +126,7 @@ textarea.code { min-height: 120px }
   <button role="tab" id="tab-month" aria-selected="true" onclick="go('month')"><span class="ico">€</span>Ce mois</button>
   <button role="tab" id="tab-queue" aria-selected="false" onclick="go('queue')"><span class="ico">↗</span>Envoyer<span id="q-badge" class="badge" hidden></span></button>
   <button role="tab" id="tab-accounts" aria-selected="false" onclick="go('accounts')"><span class="ico">≡</span>Comptes</button>
-  <button role="tab" id="tab-bourse" aria-selected="false" onclick="go('bourse')"><span class="ico">↗︎</span>Bourse</button>
+  <button role="tab" id="tab-bourse" aria-selected="false" onclick="go('bourse')"><span class="ico">↗︎</span>Bourse<span id="b-badge" class="badge" style="background:var(--bad)" hidden></span></button>
   <button role="tab" id="tab-file" aria-selected="false" onclick="go('file')"><span class="ico">⇩</span>Fichier</button>
 </nav>
 
@@ -488,10 +488,53 @@ function viewAccounts() {
 const pct = x => x == null ? '—' : (x * 100).toFixed(1).replace('.', ',') + ' %';
 const n2 = x => x == null ? '—' : Number(x).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
 function ibLink(u) { return u ? `<a href="${esc(u)}" target="_blank" rel="noopener" class="small">Voir dans IBKR ↗</a>` : ''; }
+// ---------- Radar du Mac (alertes sur les lignes, opportunités) ----------
+// « vu » se mémorise sur cet iPhone seulement (le Mac garde son propre « ✓ vu »).
+function radarSeenSet() { try { return new Set(JSON.parse(store.get('mf-radar-seen') || '[]')); } catch (e) { return new Set(); } }
+function radarToggleSeen(id) { const s = radarSeenSet(); s.has(id) ? s.delete(id) : s.add(id); store.set('mf-radar-seen', JSON.stringify([...s].slice(-300))); render(); }
+function radarOpen() { const R = data && data.radar; if (!R) return []; const s = radarSeenSet(); return (R.alerts || []).filter(a => a.level !== 'info' && !a.seen && !s.has(a.id)); }
+function viewRadar() {
+  const R = data && data.radar;
+  if (!R) return '';
+  const s = radarSeenSet(), LV = { critique: ['🔴', 'Critique', 'bad'], serieux: ['🟠', 'Sérieux', 'warn'], info: ['🔵', 'Information', 'info'] };
+  const al = (R.alerts || []).filter(a => a.level !== 'info'), inf = (R.alerts || []).filter(a => a.level === 'info');
+  const card = a => { const L = LV[a.level] || LV.info, seen = a.seen || s.has(a.id);
+    return `<div class="panel" style="padding:12px;border-left:4px solid var(--${L[2] === 'info' ? 'accent' : L[2]});${seen ? 'opacity:.55' : ''}">
+      <div class="top"><h2 style="font-size:1rem">${esc(a.symbol)} <span class="small muted">${esc(a.name || '')}</span></h2><span class="chip ${L[2]}">${L[0]} ${L[1]}</span></div>
+      <div class="small">${a.link ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>` : esc(a.title)}</div>
+      <div class="small muted">${a.date ? dfr(a.date) + ' · ' : ''}${esc(a.why || '')}</div>
+      ${a.action ? `<div class="small" style="margin-top:4px"><b>👉 ${esc(a.action)}</b></div>` : ''}
+      ${a.level !== 'info' ? `<button class="btn-ghost" style="margin-top:6px;padding:6px 10px;font-size:.8rem" onclick="radarToggleSeen('${esc(a.id)}')">${seen ? '↺ remettre' : '✓ vu'}</button>` : ''}</div>`; };
+  const age = Math.round((Date.now() - new Date(R.at).getTime()) / 3600000);
+  return `<div class="panel"><div class="top"><h2>📡 Radar du ${dfr(R.day)}</h2><span class="chip ${radarOpen().length ? 'bad' : 'ok'}">${radarOpen().length ? radarOpen().length + ' à voir' : 'rien d\'inquiétant'}</span></div>
+      <p class="small muted">${R.n || 0} ligne(s) lue(s) à ${String(R.at).slice(11, 16)} · lecture : ${esc(R.by || '')}${age > 30 ? ' · <b style="color:var(--warn)">Radar ancien : relancez-le sur le Mac</b>' : ''}</p>
+      ${R.synthesis ? `<p class="small" style="background:var(--accent-soft);border-radius:10px;padding:8px 10px;margin:6px 0 0"><b>🤖 Synthèse de Claude</b><br>${esc(R.synthesis)}</p>` : ''}</div>
+    ${al.length ? al.map(card).join('') : '<div class="banner ok">✅ Aucune alerte critique ou sérieuse sur vos lignes.</div>'}
+    ${inf.length ? `<details class="panel" style="padding:12px"><summary class="small"><b>🔵 Informations (${inf.length})</b></summary>${inf.map(card).join('')}</details>` : ''}
+    ${(R.opps || []).length ? `<details class="panel" style="padding:12px"><summary class="small"><b>🟢 Opportunités du jour (${R.opps.length})</b> <span class="muted">· pistes à étudier, pas des achats</span></summary><div class="list" style="margin-top:6px">${R.opps.map(o => `<div style="display:block"><b>${esc(o.symbol)}</b> <span class="small muted">${esc(o.name)} · ${esc(o.src)}</span><div class="small">${o.link ? `<a href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.title)} ↗</a>` : esc(o.title)}</div>${o.detail ? `<div class="small muted">${esc(o.detail)}</div>` : ''}</div>`).join('')}</div></details>` : ''}
+    <p class="small muted">Alertes automatiques à partir de titres d'articles publics : vérifiez avant toute décision. Les ordres se passent dans IBKR Mobile.</p>`;
+}
+// ---------- Synthèse de la semaine (préparée par le Mac) ----------
+function viewWeek() {
+  const W = data && data.weekly;
+  if (!W) return '';
+  const sg = v => v == null ? '—' : (v >= 0 ? '+' : '') + eur(v), col = v => v == null ? 'inherit' : v >= 0 ? 'var(--ok)' : 'var(--bad)';
+  const row = (l, v, c) => `<div><span class="name">${l}</span><span class="money" style="color:${c || 'inherit'}">${v}</span></div>`;
+  return `<details class="panel" ${W.open ? 'open' : ''}><summary><b>🗓 Synthèse de la semaine</b> <span class="small muted">du ${dfr(W.from)} au ${dfr(W.to)}</span></summary>
+    <div class="list" style="margin-top:8px">
+      ${W.net != null ? row('Patrimoine net', eur(W.net)) : ''}
+      ${W.placements ? row('Placements : plus ou moins-value totale', sg(W.placements.gain), col(W.placements.gain)) : ''}
+      ${W.bourse ? row('Bourse : valeur', eur(W.bourse.value)) + (W.bourse.week != null ? row('Bourse : sur 7 jours', sg(W.bourse.week) + (W.bourse.weekPct != null ? ` (${(W.bourse.weekPct >= 0 ? '+' : '') + (W.bourse.weekPct * 100).toFixed(1).replace('.', ',')} %)` : ''), col(W.bourse.week)) : '') : ''}
+      ${W.risk ? row('Risque : baisse de 20 % des marchés', sg(W.risk.crash), 'var(--bad)') : ''}
+    </div>
+    ${(W.points || []).length ? `<ul class="small" style="margin:8px 0 0;padding-left:1.1rem;display:grid;gap:4px">${W.points.map(p => `<li>${p.lvl === 'bad' ? '🔴 ' : p.lvl === 'warn' ? '🟠 ' : ''}${esc(p.txt)}</li>`).join('')}</ul>` : ''}
+    ${(W.dividends || []).length ? `<p class="small" style="margin:8px 0 2px"><b>Dividendes attendus (30 jours)</b></p><div class="list">${W.dividends.map(d => `<div><span class="name">${dfr(d.date)} · ${esc(d.symbol)}</span><span class="money">${d.amount != null ? '≈ ' + eur(d.amount) : ''}</span></div>`).join('')}</div>` : ''}
+    <p class="small muted" style="margin-top:6px">Préparée le ${dfr(String(W.at).slice(0, 10))} par MyFinance sur le Mac.</p></details>`;
+}
 function viewBourse() {
   if (!data) return viewFile();
   const B = data.bourse;
-  if (!B) return `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Analyser » dans MyFinance (onglet Bourse) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
+  if (!B) return viewWeek() + viewRadar() + `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Analyser » dans MyFinance (onglet Bourse) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
   const age = Math.round((Date.now() - new Date(B.at).getTime()) / 3600000);
   const actChip = k => k === 'vendre' || k === 'alleger' ? 'bad' : k === 'renforcer' ? 'ok' : 'info';
   const pos = (B.positions || []).map(p => `<div class="panel" style="padding:12px">
@@ -512,7 +555,7 @@ function viewBourse() {
       <div class="small"><b style="color:var(--ok)">${known.length - missing.length} posé(s)</b> · <b style="color:${missing.length ? 'var(--bad)' : 'var(--ok)'}">${missing.length} sans stop</b>${missing.length ? ' : ' + missing.map(p => esc(p.symbol)).join(', ') : ''} · <b style="color:${fix.length ? 'var(--warn)' : 'var(--ok)'}">${fix.length} à remonter</b>${fix.length ? ' : ' + fix.map(p => esc(p.symbol)).join(', ') : ''}</div>
       <div class="small muted">Ordres ouverts lus dans IB Gateway lors de la dernière mise à jour sur le Mac (y compris ceux passés depuis l'app IBKR du téléphone). Un ordre posé depuis apparaîtra à la prochaine mise à jour.</div></div>`
     : `<div class="panel small muted" style="padding:12px">Stops réellement posés : inconnus dans ce fichier. Sur le Mac, avec IB Gateway ouvert, cliquez « 📥 Mettre à jour et analyser », puis ouvrez ici le nouveau fichier.</div>`;
-  return `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(String(B.at).slice(0, 10))} à ${String(B.at).slice(11, 16)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule : passez les ordres dans IBKR Mobile.</div>
+  return viewWeek() + viewRadar() + `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(String(B.at).slice(0, 10))} à ${String(B.at).slice(11, 16)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule : passez les ordres dans IBKR Mobile.</div>
     ${stopBox}
     <div class="panel"><h2>Mes positions : stops et actions</h2><p class="small muted">L'écart d'un stop suiveur se compte depuis le plus haut atteint après la pose de l'ordre, pas depuis votre prix d'achat. « Suiveur » sur l'iPhone = « Trail » sur le PC.</p></div>
     ${pos || '<div class="panel small muted">Aucune position.</div>'}
@@ -558,7 +601,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.4.1 du 07/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.5.0 du 08/11/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
@@ -567,6 +610,7 @@ function render() {
   else { chip.className = 'chip info'; chip.textContent = encrypted ? 'Verrouillé' : 'Aucun fichier'; }
   ['month', 'queue', 'accounts', 'bourse', 'file'].forEach(v => $('tab-' + v).setAttribute('aria-selected', String(v === view)));
   const qb = $('q-badge'); qb.hidden = !queue.length; qb.textContent = queue.length;
+  const bb = $('b-badge'), nb = data && !data.example ? radarOpen().length : 0; bb.hidden = !nb; bb.textContent = nb;
   const body = view === 'queue' ? viewQueue() : view === 'accounts' ? viewAccounts() : view === 'bourse' ? viewBourse() : view === 'file' ? viewFile() : viewMonth();
   $('view').innerHTML = (data && data.example ? `<div class="banner example">Exemple : ces chiffres sont fictifs. Ouvrez votre fichier dans l'onglet « Fichier ».</div>` : '')
     + (notice ? `<div class="banner ${notice.kind}" role="status">${esc(notice.text)}</div>` : '') + body;
