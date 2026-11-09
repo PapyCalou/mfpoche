@@ -1,0 +1,43 @@
+MyFinance Poche — application iPhone autonome (version 1.2 du 05/11/2026)
+====================================================================
+
+Ce dossier contient uniquement le CODE de l'application. Aucun chiffre, aucun compte, aucun mot de passe.
+Vos données restent dans OneDrive (chiffrées) et sur l'iPhone (chiffrées).
+
+1. PUBLIER L'APPLICATION (une seule fois, ~15 minutes, sur le Mac)
+   a. https://github.com/signup : créez un compte gratuit (e-mail, mot de passe, identifiant).
+      L'identifiant apparaîtra dans l'adresse de l'application : https://IDENTIFIANT.github.io/mfpoche/
+   b. En haut à droite « + » › « New repository ».
+      Repository name : mfpoche — cochez « Public » — bouton « Create repository ».
+   c. Sur la page suivante, lien « uploading an existing file ».
+      Glissez les 6 fichiers : index.html, sw.js, manifest.webmanifest, apple-touch-icon.png, icon-192.png, icon-512.png
+      (inutile d'envoyer ce LISEZ-MOI). Bouton vert « Commit changes ».
+   d. Onglet « Settings » du dépôt › menu de gauche « Pages ».
+      « Source » : Deploy from a branch — « Branch » : main, dossier / (root) — « Save ».
+   e. Patientez 1 à 2 minutes, rechargez la page « Pages » : l'adresse https://IDENTIFIANT.github.io/mfpoche/ s'affiche.
+
+2. INSTALLER SUR L'IPHONE
+   a. Ouvrez cette adresse dans SAFARI (pas Chrome).
+   b. Bouton Partager (carré avec flèche) › « Sur l'écran d'accueil » › Ajouter.
+   c. Désormais, ouvrez toujours « MF Poche » par son icône.
+
+3. PREMIÈRE OUVERTURE
+   a. Onglet « Fichier » › « Ouvrir le fichier » › Parcourir › OneDrive › … › Banques › MyFinance › iPhone › MyFinance-mobile.json
+   b. Mot de passe MyFinance (il ne quitte pas l'iPhone).
+   c. « Activer Face ID sur cet iPhone » (iOS 18 ou plus récent) : acceptez l'enregistrement de l'identifiant.
+
+4. AU QUOTIDIEN
+   - « Ce mois » : cochez les mois virés › « J'ai fait le virement » › « Noter ce virement ».
+   - « Envoyer » › « Envoyer au Mac » › « Enregistrer dans Fichiers » › OneDrive › … › MyFinance › iPhone.
+   - Le Mac (MyFinance ouvert) l'intègre dans les 2 minutes.
+   - « Ce mois » › « Utiliser une provision » (nouveau, 1.2) : vous avez viré de l'argent de l'épargne vers le compte
+     courant pour payer une dépense provisionnée ? Choisissez les comptes, les enveloppes à débiter et leurs montants ;
+     le Mac enregistre le virement et débite les enveloppes (avec son N° de mouvement lié).
+   - « Bourse » (nouveau, 1.2) : plan d'action du jour, stops suiveurs conseillés (avec les prix), quantités, notes du carnet,
+     liens vers IBKR. Lecture seule : les ordres se passent dans IBKR Mobile. Les chiffres sont ceux de la dernière analyse
+     faite sur le Mac (automatique chaque matin si vous l'activez, MyFinance ouvert sur le Mac).
+   - Pour des chiffres à jour : « Fichier » › « Ouvrir un fichier plus récent ».
+
+MISE À JOUR DE L'APPLICATION : remplacez les fichiers dans le dépôt GitHub (même méthode « Add file › Upload files »).
+Pour la 1.2 : index.html et sw.js ont changé (envoyez les deux).
+L'iPhone prend la nouvelle version à la prochaine ouverture avec réseau.
