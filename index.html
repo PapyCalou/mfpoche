@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.5.0 du 08/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.5.1 du 11/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -154,6 +154,11 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const eur = n => (Number(n) || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 const dfr = d => d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '';
+// Date et heure d'un instant, à l'heure de l'iPhone (le Mac écrit l'heure du fichier en temps universel)
+const lday = iso => { const d = new Date(iso); return isNaN(d) ? String(iso || '').slice(0, 10) : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const hm = iso => { const d = new Date(iso); return isNaN(d) ? String(iso || '').slice(11, 16) : d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); };
+const dhm = iso => iso ? dfr(lday(iso)) + ' à ' + hm(iso) : '';
+let pickedFresh = false;
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const acc = id => (data.accounts || []).find(a => a.id === id);
 const accName = id => { const a = acc(id); return a ? a.name : '?'; };
@@ -179,6 +184,7 @@ function readPicked(ev) {
   rd.readAsText(f);
 }
 function loadEnvelope(text, fresh) {
+  pickedFresh = !!fresh;
   let o;
   try { o = JSON.parse(text); } catch (e) { notice = { kind: 'bad', text: "Ce fichier n'est pas un fichier MyFinance (JSON illisible)." }; render(); return; }
   if (o && o.myfinanceEncrypted === 1 && o.keys && o.keys.pwd) { envText = text; encrypted = true; dek = null; data = null; if (fresh) store.set('mf-mobile-file', text); view = 'file'; outCache = null; notice = { kind: 'info', text: bioInfo() ? 'Fichier chiffré : Face ID ou mot de passe MyFinance.' : 'Fichier chiffré : saisissez votre mot de passe MyFinance.' }; render(); setTimeout(() => { const p = $('pwd'); if (p) p.focus(); }, 50); return; }
@@ -204,6 +210,13 @@ async function afterLoad() {
   const before = queue.length; queue = queue.filter(it => !applied.has(it.id));
   if (queue.length !== before) await saveQueue();
   notice = before !== queue.length ? { kind: 'ok', text: `${before - queue.length} retour(s) déjà pris en compte par le Mac.` } : null;
+  // Le fichier qui vient d'être choisi est-il vraiment plus récent que le précédent ? Sinon l'iPhone a reçu une ancienne copie.
+  if (!data.example && data.generatedAt) {
+    const prev = store.get('mf-last-gen') || '';
+    if (pickedFresh && prev && data.generatedAt <= prev) notice = { kind: 'bad', text: `⚠️ Ce fichier a été préparé par le Mac le ${dhm(data.generatedAt)} : il n'est pas plus récent que celui déjà ouvert${data.generatedAt < prev ? ' (' + dhm(prev) + ')' : ''}. L'iPhone a reçu une ancienne copie. Ouvrez l'application OneDrive, tirez la liste vers le bas pour l'actualiser, attendez que l'heure du fichier change, puis rouvrez-le ici. Sur le Mac, le bas du menu indique l'heure du dernier fichier écrit (« iPhone à jour »).` };
+    if (data.generatedAt > prev) store.set('mf-last-gen', data.generatedAt);
+  }
+  pickedFresh = false;
   monthSel = new Set((data.months || []).filter(m => !m.done && !m.missing && m.pending > 0).map(m => m.month));
   view = 'month'; render();
 }
@@ -503,11 +516,11 @@ function viewRadar() {
       <div class="top"><h2 style="font-size:1rem">${esc(a.symbol)} <span class="small muted">${esc(a.name || '')}</span></h2><span class="chip ${L[2]}">${L[0]} ${L[1]}</span></div>
       <div class="small">${a.link ? `<a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.title)} ↗</a>` : esc(a.title)}</div>
       <div class="small muted">${a.date ? dfr(a.date) + ' · ' : ''}${esc(a.why || '')}</div>
-      ${a.action ? `<div class="small" style="margin-top:4px"><b>👉 ${esc(a.action)}</b></div>` : ''}
+      ${a.action ? `<div class="small" style="margin-top:4px"><b>👉 ${esc(a.action)}</b></div>` : a.same ? `<div class="small muted" style="margin-top:4px">👉 Même proposition que ci-dessus pour ${esc(a.symbol)}.</div>` : ''}
       ${a.level !== 'info' ? `<button class="btn-ghost" style="margin-top:6px;padding:6px 10px;font-size:.8rem" onclick="radarToggleSeen('${esc(a.id)}')">${seen ? '↺ remettre' : '✓ vu'}</button>` : ''}</div>`; };
   const age = Math.round((Date.now() - new Date(R.at).getTime()) / 3600000);
   return `<div class="panel"><div class="top"><h2>📡 Radar du ${dfr(R.day)}</h2><span class="chip ${radarOpen().length ? 'bad' : 'ok'}">${radarOpen().length ? radarOpen().length + ' à voir' : 'rien d\'inquiétant'}</span></div>
-      <p class="small muted">${R.n || 0} ligne(s) lue(s) à ${String(R.at).slice(11, 16)} · lecture : ${esc(R.by || '')}${age > 30 ? ' · <b style="color:var(--warn)">Radar ancien : relancez-le sur le Mac</b>' : ''}</p>
+      <p class="small muted">${R.n || 0} ligne(s) lue(s) à ${hm(R.at)}${R.syncAt ? ' · propositions recalculées à ' + hm(R.syncAt) + ' avec la dernière analyse' : ''} · lecture : ${esc(R.by || '')}${age > 30 ? ' · <b style="color:var(--warn)">Radar ancien : relancez-le sur le Mac</b>' : ''}</p>
       ${R.synthesis ? `<p class="small" style="background:var(--accent-soft);border-radius:10px;padding:8px 10px;margin:6px 0 0"><b>🤖 Synthèse de Claude</b><br>${esc(R.synthesis)}</p>` : ''}</div>
     ${al.length ? al.map(card).join('') : '<div class="banner ok">✅ Aucune alerte critique ou sérieuse sur vos lignes.</div>'}
     ${inf.length ? `<details class="panel" style="padding:12px"><summary class="small"><b>🔵 Informations (${inf.length})</b></summary>${inf.map(card).join('')}</details>` : ''}
@@ -555,7 +568,7 @@ function viewBourse() {
       <div class="small"><b style="color:var(--ok)">${known.length - missing.length} posé(s)</b> · <b style="color:${missing.length ? 'var(--bad)' : 'var(--ok)'}">${missing.length} sans stop</b>${missing.length ? ' : ' + missing.map(p => esc(p.symbol)).join(', ') : ''} · <b style="color:${fix.length ? 'var(--warn)' : 'var(--ok)'}">${fix.length} à remonter</b>${fix.length ? ' : ' + fix.map(p => esc(p.symbol)).join(', ') : ''}</div>
       <div class="small muted">Ordres ouverts lus dans IB Gateway lors de la dernière mise à jour sur le Mac (y compris ceux passés depuis l'app IBKR du téléphone). Un ordre posé depuis apparaîtra à la prochaine mise à jour.</div></div>`
     : `<div class="panel small muted" style="padding:12px">Stops réellement posés : inconnus dans ce fichier. Sur le Mac, avec IB Gateway ouvert, cliquez « 📥 Mettre à jour et analyser », puis ouvrez ici le nouveau fichier.</div>`;
-  return viewWeek() + viewRadar() + `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(String(B.at).slice(0, 10))} à ${String(B.at).slice(11, 16)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule : passez les ordres dans IBKR Mobile.</div>
+  return viewWeek() + viewRadar() + `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(lday(B.at))} à ${hm(B.at)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule : passez les ordres dans IBKR Mobile.</div>
     ${stopBox}
     <div class="panel"><h2>Mes positions : stops et actions</h2><p class="small muted">L'écart d'un stop suiveur se compte depuis le plus haut atteint après la pose de l'ordre, pas depuis votre prix d'achat. « Suiveur » sur l'iPhone = « Trail » sur le PC.</p></div>
     ${pos || '<div class="panel small muted">Aucune position.</div>'}
@@ -566,13 +579,14 @@ function viewBourse() {
 }
 function viewFile() {
   const cached = store.get('mf-mobile-file');
-  let when = '';
-  try { const o = JSON.parse(cached || envText || '{}'); when = o.savedAt || o.generatedAt || ''; } catch (e) {}
+  let when = (data && !data.example && data.generatedAt) || store.get('mf-last-gen') || '';
+  if (!when) { try { const o = JSON.parse(cached || envText || '{}'); when = o.savedAt || o.generatedAt || ''; } catch (e) {} }
+  const ageH = when ? Math.round((Date.now() - new Date(when).getTime()) / 3600000) : 0;
   return `<div class="panel">
     <h2>Fichier du Mac</h2>
     <p class="small">Le Mac dépose <code>MyFinance-mobile.json</code> dans OneDrive › … › Banques › MyFinance › <b>iPhone</b>. Ouvrez-le ici (app Fichiers › OneDrive).</p>
     <label class="btn ${encrypted && envText && !dek ? '' : 'btn-primary'}" for="pick">${envText ? 'Ouvrir un fichier plus récent' : 'Ouvrir le fichier'}<input id="pick" type="file" onchange="readPicked(event)" hidden></label>
-    ${when ? `<p class="small muted">Dernier fichier ouvert : préparé le ${dfr(when.slice(0, 10))} à ${when.slice(11, 16)}.</p>` : ''}
+    ${when ? `<p class="small muted">Dernier fichier ouvert : préparé par le Mac le <b>${dhm(when)}</b>${ageH >= 6 ? ` (il y a ${ageH >= 48 ? Math.round(ageH / 24) + ' jours' : ageH + ' h'})` : ''}. Comparez avec l'heure affichée sur le Mac, en bas du menu : « iPhone à jour (heure) ».</p>` : ''}
   </div>
   ${!isStandalone() ? `<div class="banner info"><b>Installer sur l'écran d'accueil :</b> dans Safari, touchez <b>Partager</b> (carré avec flèche) › <b>Sur l'écran d'accueil</b> › Ajouter. Ensuite, ouvrez toujours MyFinance Poche par son icône (Safari et l'icône ne partagent pas leurs données).</div>` : ''}
   ${encrypted && envText && !dek && bioInfo() ? `<button class="btn-primary bio-btn" onclick="unlockBio(false)" ${bioBusy ? 'disabled' : ''}>${FACE_SVG}${bioBusy ? 'Face ID…' : 'Déverrouiller avec Face ID'}</button>` : ''}
@@ -601,12 +615,12 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.5.0 du 08/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.5.1 du 11/11/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
   if (data && data.example) { chip.className = 'chip warn'; chip.textContent = 'Exemple'; }
-  else if (data) { chip.className = 'chip ok'; chip.textContent = 'Données du ' + dfr((data.generatedAt || '').slice(0, 10)); }
+  else if (data) { chip.className = 'chip ok'; chip.textContent = 'Données du ' + dhm(data.generatedAt).replace(/\/\d{4} à/, ' à'); }
   else { chip.className = 'chip info'; chip.textContent = encrypted ? 'Verrouillé' : 'Aucun fichier'; }
   ['month', 'queue', 'accounts', 'bourse', 'file'].forEach(v => $('tab-' + v).setAttribute('aria-selected', String(v === view)));
   const qb = $('q-badge'); qb.hidden = !queue.length; qb.textContent = queue.length;
