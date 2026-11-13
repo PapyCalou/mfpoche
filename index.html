@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.5.1 du 11/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.6.0 du 13/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -544,37 +544,84 @@ function viewWeek() {
     ${(W.dividends || []).length ? `<p class="small" style="margin:8px 0 2px"><b>Dividendes attendus (30 jours)</b></p><div class="list">${W.dividends.map(d => `<div><span class="name">${dfr(d.date)} · ${esc(d.symbol)}</span><span class="money">${d.amount != null ? '≈ ' + eur(d.amount) : ''}</span></div>`).join('')}</div>` : ''}
     <p class="small muted" style="margin-top:6px">Préparée le ${dfr(String(W.at).slice(0, 10))} par MyFinance sur le Mac.</p></details>`;
 }
+// ---------- Bourse (1.6.0) : quatre écrans, comme les cases du Mac : Portefeuille, Plan, Ordres, Radar ----------
+let bTab = store.get('mf-btab') || 'pf', bOpen = {};
+function bSet(t) { bTab = t; store.set('mf-btab', t); render(); try { window.scrollTo(0, 0); } catch (e) {} }
+function bToggle(s) { bOpen[s] = !bOpen[s]; render(); }
+const B_FLAG = { critique: ['🔴', 'Actualité critique (Radar du jour)'], serieux: ['🟠', 'Actualité sérieuse (Radar du jour)'], ok: ['🟢', 'Rien de sérieux dans l\'actualité du jour'], none: ['⚪', 'Le Radar n\'est pas encore passé aujourd\'hui'] };
+const B_SC = { fcf: 'Flux de trésorerie', bilan: 'Bilan', moat: 'Qualité', valo: 'Valorisation', trend: 'Tendance' };
+const bFlag = f => f && B_FLAG[f] ? `<span title="${B_FLAG[f][1]}" aria-label="${B_FLAG[f][1]}">${B_FLAG[f][0]}</span>` : '';
+const bSym = (s, y) => y ? `<a href="${esc(y)}" target="_blank" rel="noopener">${esc(s)} ↗</a>` : esc(s);
+const sgn = v => (v >= 0 ? '+' : '') + eur(v);
+const bUp = a => a.up == null ? '' : `potentiel InvestingPro <b style="color:var(--${a.up >= 0 ? 'ok' : 'bad'})">${a.up >= 0 ? '+' : ''}${pct(a.up)}</b>`;
+const bCol = n => n == null ? 'var(--muted)' : n >= 7 ? 'var(--ok)' : n >= 5 ? 'var(--warn)' : 'var(--bad)';
+function bFix(B) { return (B.positions || []).filter(p => !p.stopOk && !p.ibNone && /^(Remonter|Resserrer)/.test(p.stopAdvice || '')); }
+function bNoStop(B) { return B.nostop ? B.nostop.filter(p => p.state !== 'unknown') : (B.positions || []).filter(p => p.ibNone).map(p => ({ symbol: p.symbol, name: p.name, state: 'none', q: p.qty, trail: p.trail, level: p.level, cur: p.cur })); }
+function bNav(B) {
+  const nOrd = bNoStop(B).length + bFix(B).length, nRad = radarOpen().length, nPlan = (B.eq || []).filter(a => a.held !== false).length;
+  const T = [['pf', '📊 Portefeuille', 0], ['plan', '🎯 Plan', nPlan], ['ordres', '📑 Ordres', nOrd], ['radar', '📡 Radar', nRad]];
+  return `<div id="b-nav" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">${T.map(([k, l, n]) => `<button type="button" data-btab="${k}" class="${bTab === k ? 'btn-primary' : 'btn-ghost'}" style="padding:8px 2px;font-size:.74rem;position:relative" aria-pressed="${bTab === k}" onclick="bSet('${k}')">${l}${n ? ` <b style="color:${bTab === k ? 'inherit' : k === 'plan' ? 'var(--accent)' : 'var(--bad)'}">${n}</b>` : ''}</button>`).join('')}</div>`;
+}
+function bPortfolio(B) {
+  const P = B.positions || [];
+  const tot = P.reduce((s, p) => s + (p.value || 0), 0), gain = P.reduce((s, p) => s + (p.gain || 0), 0), hasVal = P.some(p => p.value != null);
+  const card = p => { const open = !!bOpen[p.symbol], sc = p.sc || {};
+    return `<div class="panel" style="padding:12px" data-bpos="${esc(p.symbol)}">
+      <div class="top"><h2 style="font-size:1rem"><button type="button" onclick="bToggle('${esc(p.symbol)}')" aria-expanded="${open}" aria-label="${open ? 'Replier' : 'Afficher les notes'}" style="width:26px;height:26px;padding:0;margin-right:6px;border:1px solid var(--line);border-radius:6px;background:var(--card);font-weight:700">${open ? '−' : '+'}</button>${bSym(p.symbol, p.yahoo)} <span class="small muted">${esc(p.name)}</span></h2>
+        <span style="white-space:nowrap">${bFlag(p.flag)} <b style="color:${bCol(p.note)}">${p.note == null ? '—' : n2(p.note)}</b><span class="small muted">/10</span></span></div>
+      <div class="small">${n2(p.price)} ${esc(p.cur)} · ${esc(String(p.qty))} titre(s)${p.value != null ? ' · <b>' + eur(p.value) + '</b>' : ''}${p.gain != null ? ` · <b style="color:var(--${p.gain >= 0 ? 'ok' : 'bad'})">${sgn(p.gain)}</b>` : ''}${p.lat != null ? ` (${p.lat >= 0 ? '+' : ''}${pct(p.lat)})` : ''} · poids ${pct(p.weight)}</div>
+      ${open ? `<div class="small" data-bnotes style="border-top:1px solid var(--line);padding-top:8px;display:grid;gap:4px">
+        ${Object.keys(B_SC).some(k => sc[k] != null) ? `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;text-align:center">${Object.keys(B_SC).map(k => `<div style="border:1px solid var(--line);border-radius:8px;padding:4px 2px"><div style="font-weight:700;color:${bCol(sc[k])}">${sc[k] == null ? '—' : n2(sc[k])}</div><div class="muted" style="font-size:.62rem">${B_SC[k]}</div></div>`).join('')}</div>` : '<div class="muted">Notes détaillées absentes de ce fichier : mettez MyFinance à jour sur le Mac (version 6100 ou plus) et relancez l\'analyse.</div>'}
+        ${bUp(p) ? `<div>${bUp(p)}${p.fair != null ? ` <span class="muted">(juste valeur ${n2(p.fair)})</span>` : ''}</div>` : ''}
+        <div>Proposition : <b>${esc(p.action || '—')}</b>${p.qtyText ? ' · ' + esc(p.qtyText) : ''}</div>
+        <div style="color:var(--${p.ibNone ? 'bad' : p.stopOk ? 'ok' : 'warn'})">Stop : ${p.ibNone ? 'aucun stop posé' : esc(p.ibStop || 'inconnu')}${p.trail ? ` · conseillé : suiveur ${pct(p.trail)}` : ''}</div>
+        ${(p.notes || []).length ? `<div style="color:var(--warn)">${p.notes.map(esc).join(' · ')}</div>` : ''}${p.broker ? `<div class="muted">Compte : ${esc(p.broker)}</div>` : ''}${ibLink(p.url)}</div>` : ''}</div>`; };
+  return `<div class="panel" style="padding:12px"><div class="top"><h2 style="font-size:1rem">📊 Mon portefeuille</h2><span class="small muted">${P.length} ligne(s)</span></div>
+      ${hasVal ? `<div class="list"><div><span class="name">Valeur des actions</span><span class="money">${eur(tot)}</span></div><div><span class="name">Plus ou moins-value latente</span><span class="money" style="color:var(--${gain >= 0 ? 'ok' : 'bad'})">${sgn(gain)}</span></div></div>` : ''}
+      <p class="small muted">« + » devant une ligne : ses cinq notes, le potentiel InvestingPro et son stop. Le drapeau résume l'actualité du jour : 🔴 critique, 🟠 sérieuse, 🟢 rien, ⚪ Radar pas encore passé.</p></div>
+    ${P.map(card).join('') || '<div class="panel small muted">Aucune position.</div>'}`;
+}
+function bPlan(B) {
+  const item = (a, i) => `<div style="display:block" data-bact="${esc(a.symbol)}"><b>${i + 1}. ${esc(a.action)} · ${bSym(a.symbol, a.yahoo)}</b> ${bFlag(a.flag)} <span class="small muted">${esc(a.name)}${a.note != null ? ' · note ' + n2(a.note) : ''}</span>
+      <div class="small">${esc(a.why)}</div><div class="small"><b>${esc(a.order)}</b></div>
+      ${a.ideal != null ? `<div class="small" data-bideal>Nombre idéal : <b>${a.ideal ? a.ideal + ' titre(s)' : '0 (la ligne a déjà sa taille)'}</b>${a.ideal && a.possible != null ? (a.possible >= a.ideal ? ' · <span style="color:var(--ok)">le budget du jour suffit</span>' : ` · possible aujourd'hui : <b>${a.possible}</b>`) : ''}</div>` : ''}
+      ${bUp(a) ? `<div class="small">${bUp(a)}</div>` : ''}${ibLink(a.url)}</div>`;
+  const all = [...(B.eq || []), ...(B.opp || [])], seen = new Set(), uniq = all.filter(a => { const k = a.symbol + '|' + a.action; if (seen.has(k)) return false; seen.add(k); return true; });
+  const v2 = uniq.some(a => a.held != null), mine = v2 ? uniq.filter(a => a.held) : (B.eq || []), others = v2 ? uniq.filter(a => !a.held) : (B.opp || []);
+  const list = L => `<div class="list">${L.map(item).join('') || '<div class="muted small">Aucune action aujourd\'hui.</div>'}</div>`;
+  return `<div class="panel"><h2>🎯 Plan d'actions : que faire sur mes lignes</h2><p class="small muted">Ventes ou allègements d'abord, puis renforcements. Budget du jour : ${eur(B.budget)}. Le nombre idéal donne à la ligne une taille normale${B.idealLine ? ` (${n2(B.idealLine)} % du portefeuille)` : ''}, sans regarder les liquidités du jour.</p>${list(mine)}</div>
+    <details class="panel" data-bothers><summary><b>💡 Achats proposés sur des valeurs non détenues (${others.length})</b> <span class="small muted">· le détail de chaque valeur est sur le Mac, case « Les opportunités »</span></summary>${list(others)}</details>`;
+}
+function bOrders(B) {
+  const NS = bNoStop(B), unk = (B.nostop || []).filter(p => p.state === 'unknown'), fix = bFix(B), O = B.orders || null;
+  const ns = p => `<div style="display:block" data-bnostop="${esc(p.symbol)}"><b>${esc(p.symbol)}</b> <span class="small muted">${esc(p.name || '')}${p.broker ? ' · ' + esc(p.broker) : ''}</span>
+      <div class="small" style="color:var(--${p.state === 'none' ? 'bad' : 'warn'})"><b>${p.state === 'none' ? 'Aucun stop de vente' : `Stop sur ${n2(p.covered)} titre(s) seulement, sur ${n2(p.q)}`}</b></div>
+      <div class="small">${p.trail ? `À poser : <b>suiveur ${pct(p.trail)}</b>${p.level ? ` (≈ ${n2(p.level)} ${esc(p.cur || '')} aujourd'hui)` : ''}${p.value ? ` · baisse acceptée ≈ ${eur(p.value * p.trail * (p.state === 'partial' && p.q ? (p.q - p.covered) / p.q : 1))}` : ''}` : 'Stop conseillé : après la prochaine analyse.'}</div></div>`;
+  const fx = p => `<div style="display:block" data-bfix="${esc(p.symbol)}"><b>${esc(p.symbol)}</b> <span class="small muted">${esc(p.name || '')}</span>
+      <div class="small">Aujourd'hui : ${esc(p.ibStop || 'inconnu')}</div><div class="small" style="color:var(--warn)"><b>${esc(p.stopAdvice || '')}</b></div>
+      <div class="small">À mettre à la place : <b>suiveur ${pct(p.trail)}</b>${p.level ? ` (≈ ${n2(p.level)} ${esc(p.cur || '')})` : ''}</div></div>`;
+  const od = o => `<div style="display:block" data-bord="${esc(o.symbol)}"><span class="chip ${o.side === 'Vente' ? 'bad' : 'ok'}">${o.side}</span> <b>${esc(o.symbol)}</b> <span class="small muted">${esc(o.type)} · ${o.qty == null ? '—' : n2(o.qty)} titre(s)${o.tif ? ' · ' + esc(o.tif) : ''}</span>
+      <div class="small">${o.trailPct != null ? `écart ${n2(o.trailPct)} % · ` : ''}${o.px != null ? `prix ${n2(o.px)} ${esc(o.cur)}` : ''}${o.price ? ` · cours ${n2(o.price)} ${esc(o.cur)}${o.px ? ` (ordre à ${(o.px / o.price - 1 >= 0 ? '+' : '−') + pct(Math.abs(o.px / o.price - 1))} du cours)` : ''}` : ''}</div></div>`;
+  return `<div class="panel" style="padding:12px;border-left:4px solid var(--${NS.length ? 'bad' : 'ok'})"><h2 style="font-size:1rem">🛡️ Actions sans stop de vente</h2>
+      ${NS.length ? `<div class="list">${NS.map(ns).join('')}</div>` : `<div class="small" style="color:var(--ok)"><b>${B.nostop ? 'Toutes vos lignes dont les ordres ont été lus ont un stop.' : 'Aucune ligne sans stop dans ce fichier.'}</b></div>`}
+      ${unk.length ? `<div class="small muted">Stop inconnu (ordres non lus pour ce compte) : ${unk.map(p => esc(p.symbol)).join(', ')}.</div>` : ''}</div>
+    <div class="panel" style="padding:12px;border-left:4px solid var(--${fix.length ? 'warn' : 'ok'})"><h2 style="font-size:1rem">🎯 Stops à remonter ou à resserrer</h2>
+      ${fix.length ? `<div class="list">${fix.map(fx).join('')}</div>` : '<div class="small" style="color:var(--ok)"><b>Aucun stop à modifier.</b></div>'}</div>
+    <div class="panel" style="padding:12px"><h2 style="font-size:1rem">📑 Ordres en attente chez IBKR${O ? ` (${O.length})` : ''}</h2>
+      ${O ? (O.length ? `<div class="list">${O.map(od).join('')}</div>` : '<div class="small muted">Aucun ordre ouvert lu dans IB Gateway.</div>') : '<div class="small muted">Liste absente de ce fichier : mettez MyFinance à jour sur le Mac (version 6100 ou plus).</div>'}
+      <div class="small muted">${B.ordersAt ? `Lus dans IB Gateway le ${dfr(lday(B.ordersAt))} à ${hm(B.ordersAt)}. ` : ''}Un ordre passé depuis apparaîtra à la prochaine mise à jour sur le Mac. Les ordres se passent dans IBKR Mobile : MF Poche ne fait que lire.</div></div>`;
+}
 function viewBourse() {
   if (!data) return viewFile();
   const B = data.bourse;
-  if (!B) return viewWeek() + viewRadar() + `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Analyser » dans MyFinance (onglet Bourse) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
+  if (!B) return viewWeek() + viewRadar() + `<div class="panel"><h2>Bourse</h2><p class="small">Aucune analyse dans le fichier du Mac. Lancez « Mettre à jour et analyser » dans MyFinance (onglet Bourse) ou activez l'analyse automatique du matin, puis ouvrez le fichier le plus récent ici.</p></div>`;
+  if (!['pf', 'plan', 'ordres', 'radar'].includes(bTab)) bTab = 'pf';
   const age = Math.round((Date.now() - new Date(B.at).getTime()) / 3600000);
-  const actChip = k => k === 'vendre' || k === 'alleger' ? 'bad' : k === 'renforcer' ? 'ok' : 'info';
-  const pos = (B.positions || []).map(p => `<div class="panel" style="padding:12px">
-      <div class="top"><h2 style="font-size:1rem">${esc(p.symbol)} <span class="small muted">${esc(p.name)}</span></h2><span class="chip ${actChip(p.actionKind)}">${esc(p.action)}</span></div>
-      <div class="small">${n2(p.price)} ${esc(p.cur)} · poids ${pct(p.weight)} · ${p.lat == null ? '' : (p.lat >= 0 ? '+' : '') + pct(p.lat) + ' · '}note ${p.note == null ? '—' : n2(p.note)}/10 · ${esc(String(p.qty))} titre(s)</div>
-      ${p.qtyText ? `<div class="small"><b>${esc(p.qtyText)}</b></div>` : ''}
-      ${p.ibStop ? `<div class="small" style="font-weight:600;color:${p.ibNone ? 'var(--bad)' : 'var(--ok)'}">${p.ibNone ? '⚠️' : '✓'} ${esc(p.ibStop)}</div>` : ''}
-      <div class="small">Stop suiveur conseillé : <b>Suiveur ${pct(p.trail)}</b>${p.level ? ` → stop à ${n2(p.level)} ${esc(p.cur)} si posé maintenant` : ''}</div>
-      <div class="small" style="color:${p.stopOk ? 'var(--ok)' : 'var(--warn)'}">${esc(p.stopAdvice)}</div>
-      ${(p.calc || []).length ? `<div class="small muted">${p.calc.map(esc).join('<br>')}</div>` : ''}
-      ${(p.notes || []).length ? `<div class="small" style="color:var(--warn)">${p.notes.map(esc).join(' · ')}</div>` : ''}
-      ${ibLink(p.url)}</div>`).join('');
-  const sim = (L, title, sub) => `<div class="panel"><h2>${title}</h2><p class="small muted">${sub}</p><div class="list">${(L || []).map((a, i) => `<div style="display:block"><b>${i + 1}. ${esc(a.action)} · ${esc(a.symbol)}</b> <span class="small muted">${esc(a.name)}${a.note != null ? ' · note ' + n2(a.note) : ''}</span>
-      <div class="small">${esc(a.why)}</div><div class="small"><b>${esc(a.order)}</b></div>${ibLink(a.url)}</div>`).join('') || '<div class="muted small">Aucune action aujourd\'hui.</div>'}</div></div>`;
   const notes = Object.entries(B.notes || {});
-  const P = B.positions || [], known = P.filter(p => p.ibStop), missing = P.filter(p => p.ibNone), fix = P.filter(p => !p.stopOk && !p.ibNone && /^(Remonter|Resserrer)/.test(p.stopAdvice || ''));
-  const stopBox = known.length ? `<div class="panel" style="padding:12px"><h2 style="font-size:1rem">Stops dans IBKR</h2>
-      <div class="small"><b style="color:var(--ok)">${known.length - missing.length} posé(s)</b> · <b style="color:${missing.length ? 'var(--bad)' : 'var(--ok)'}">${missing.length} sans stop</b>${missing.length ? ' : ' + missing.map(p => esc(p.symbol)).join(', ') : ''} · <b style="color:${fix.length ? 'var(--warn)' : 'var(--ok)'}">${fix.length} à remonter</b>${fix.length ? ' : ' + fix.map(p => esc(p.symbol)).join(', ') : ''}</div>
-      <div class="small muted">Ordres ouverts lus dans IB Gateway lors de la dernière mise à jour sur le Mac (y compris ceux passés depuis l'app IBKR du téléphone). Un ordre posé depuis apparaîtra à la prochaine mise à jour.</div></div>`
-    : `<div class="panel small muted" style="padding:12px">Stops réellement posés : inconnus dans ce fichier. Sur le Mac, avec IB Gateway ouvert, cliquez « 📥 Mettre à jour et analyser », puis ouvrez ici le nouveau fichier.</div>`;
-  return viewWeek() + viewRadar() + `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(lday(B.at))} à ${hm(B.at)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule : passez les ordres dans IBKR Mobile.</div>
-    ${stopBox}
-    <div class="panel"><h2>Mes positions : stops et actions</h2><p class="small muted">L'écart d'un stop suiveur se compte depuis le plus haut atteint après la pose de l'ordre, pas depuis votre prix d'achat. « Suiveur » sur l'iPhone = « Trail » sur le PC.</p></div>
-    ${pos || '<div class="panel small muted">Aucune position.</div>'}
-    ${sim(B.eq, '1 · Équilibre du portefeuille', `Ventes ou allègements d'abord, puis achats là où vous êtes peu exposé. Budget ${eur(B.budget)}.`)}
-    ${sim(B.opp, '2 · Opportunités du moment', '« maintenant » : ordre Limite au cours (Jour) ; « sur repli » : ordre Limite sous le cours (jusqu\'à annulation).')}
-    ${notes.length ? `<div class="panel"><h2>Notes du carnet</h2>${notes.map(([sym, l]) => `<details><summary><b>${esc(sym)}</b> <span class="small muted">${l.length} note(s)</span></summary>${l.map(e => `<div class="small" style="margin:6px 0"><b>${dfr(e.date)}</b> · ${esc(e.type)} · ${esc(e.title)}<br><span class="muted">${esc(e.text)}</span></div>`).join('')}</details>`).join('')}</div>` : ''}
+  const body = bTab === 'plan' ? bPlan(B) : bTab === 'ordres' ? bOrders(B) : bTab === 'radar' ? viewRadar()
+    : viewWeek() + bPortfolio(B) + (notes.length ? `<details class="panel"><summary><b>📒 Notes du carnet</b> <span class="small muted">${notes.length} valeur(s)</span></summary>${notes.map(([sym, l]) => `<details><summary><b>${esc(sym)}</b> <span class="small muted">${l.length} note(s)</span></summary>${l.map(e => `<div class="small" style="margin:6px 0"><b>${dfr(e.date)}</b> · ${esc(e.type)} · ${esc(e.title)}<br><span class="muted">${esc(e.text)}</span></div>`).join('')}</details>`).join('')}</details>` : '');
+  return bNav(B) + `<div class="banner ${age > 30 ? 'bad' : 'info'}">Analyse du ${dfr(lday(B.at))} à ${hm(B.at)}${age > 30 ? ' : ancienne, ouvrez un fichier plus récent ou relancez l\'analyse sur le Mac' : ''}. Lecture seule.</div>
+    ${body}
     <p class="small muted">Calculs automatiques, pas des conseils personnalisés. Vérifiez cours et devise chez votre courtier avant tout ordre.</p>`;
 }
 function viewFile() {
@@ -615,7 +662,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.5.1 du 11/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.6.0 du 13/11/2026</p>`;
 }
 function render() {
   const chip = $('src-chip');
