@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.6.0 du 13/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.7.0 du 16/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -66,6 +66,9 @@ h1 { font-size: 1.55rem; font-weight: 800 }
 h2 { font-size: 1.12rem; font-weight: 800 }
 .eyebrow { font-size: .72rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); font-weight: 600 }
 .money { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap }
+/* 1.7.0 : montants floutés par défaut (écrans Comptes et Bourse) */
+body.mf-blur .blurv { filter: blur(6px); -webkit-user-select: none; user-select: none }
+#blur-btn { border: 1px solid var(--line, #cbd5e1); background: transparent; color: inherit; border-radius: 999px; padding: 2px 10px; font-size: .95rem; line-height: 1.4; margin-right: 6px }
 .muted { color: var(--muted) } .small { font-size: .82rem }
 .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; flex-wrap: wrap }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; font-size: .75rem; font-weight: 600; white-space: nowrap }
@@ -118,7 +121,7 @@ textarea.code { min-height: 120px }
 <div class="wrap" id="app">
   <header class="top">
     <div><div class="eyebrow">MyFinance · iPhone</div><h1>Virements de provisions</h1></div>
-    <span id="src-chip" class="chip warn">Exemple</span>
+    <span style="display:flex;align-items:center"><button id="blur-btn" type="button" onclick="blurToggle()" aria-label="Afficher ou flouter les montants" title="Afficher ou flouter les montants">👁</button><span id="src-chip" class="chip warn">Exemple</span></span>
   </header>
   <div id="view"></div>
 </div>
@@ -662,8 +665,16 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.6.0 du 13/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.7.0 du 16/11/2026</p>`;
 }
+// ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
+// À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
+let blurOn = true;
+const BLUR_VIEWS = ['accounts', 'bourse'];
+function blurPaint() { document.body.classList.toggle('mf-blur', blurOn); const b = $('blur-btn'); if (b) { b.textContent = blurOn ? '👁' : '🙈'; b.hidden = !BLUR_VIEWS.includes(view) || !data; } }
+function blurToggle() { blurOn = !blurOn; blurPaint(); }
+function blurMark() { if (!BLUR_VIEWS.includes(view)) return; $('view').querySelectorAll('.money, .big, b').forEach(el => { if (el.closest('.blurv') || el.closest('button, a, summary')) return; if (/\d[\d\s\u00a0\u202f.,]*\s?€/.test(el.textContent || '')) el.classList.add('blurv'); }); }
+document.addEventListener('click', ev => { if (!blurOn) return; const t = ev.target && ev.target.closest ? ev.target.closest('.blurv') : null; if (!t) return; ev.stopPropagation(); ev.preventDefault(); blurOn = false; blurPaint(); }, true);
 function render() {
   const chip = $('src-chip');
   if (data && data.example) { chip.className = 'chip warn'; chip.textContent = 'Exemple'; }
@@ -675,6 +686,7 @@ function render() {
   const body = view === 'queue' ? viewQueue() : view === 'accounts' ? viewAccounts() : view === 'bourse' ? viewBourse() : view === 'file' ? viewFile() : viewMonth();
   $('view').innerHTML = (data && data.example ? `<div class="banner example">Exemple : ces chiffres sont fictifs. Ouvrez votre fichier dans l'onglet « Fichier ».</div>` : '')
     + (notice ? `<div class="banner ${notice.kind}" role="status">${esc(notice.text)}</div>` : '') + body;
+  blurMark(); blurPaint();
 }
 
 // ---------- Démarrage ----------
