@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.8.0 du 18/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.8.1 du 18/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -385,20 +385,33 @@ function useForm() {
     </form>`;
 }
 // ---------- 1.8.0 : déplacer des provisions d'un placement vers un autre, en passant par le compte courant ----------
-let moveOpen = false;
+let moveOpen = false, movePre = null;
+// 1.8.1 : un placement choisi dans « Depuis » du virement → c'est un déplacement de provisions
+function tFromPick(sel) {
+  const a = (data.accounts || []).find(x => x.id === sel.value);
+  if (!a || a.current) return;
+  if (data.example) { exampleGuard(); return; }
+  if (!canTransit()) { notice = { kind: 'bad', text: `Partir de « ${a.name} » n'est pas encore possible ici : ouvrez et déverrouillez MyFinance (version 7100 ou plus récente) sur le Mac, puis rouvrez ici le fichier du Mac (onglet « Fichier »).` }; render(); window.scrollTo(0, 0); return; }
+  movePre = { from: a.id, amount: ($('t-amount') || {}).value || '', date: ($('t-date') || {}).value || today() };
+  moveOpen = true; formOpen = false; useOpen = false;
+  notice = { kind: 'ok', text: `Départ de « ${a.name} » : c'est un déplacement de provisions. Complétez le cadre « Déplacer des provisions » : compte courant de passage et placement d'arrivée.` };
+  render();
+  setTimeout(() => { const el = $('move-panel'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' }); }, 40);
+}
 const canTransit = () => !!(data && Array.isArray(data.caps) && data.caps.includes('transit'));
 function moveForm() {
   const opt = (L, sel) => L.map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)} — ${esc(a.bank)}${a.num ? ' …' + esc(a.num) : ''}</option>`).join('');
   const pl = (data.accounts || []).filter(a => !a.current && !a.debt), cur = (data.accounts || []).filter(a => a.current), p = data.plan || {};
+  const pre = movePre || {}, fromSel = pre.from || (pl[0] || {}).id, toSel = ((pl.find(a => a.id !== fromSel)) || {}).id;
   return `<form class="panel" style="border-style:dashed" onsubmit="addMove(event)">
-      <div class="row"><label class="field">Date<input id="v-date" type="date" value="${today()}" required></label>
-      <label class="field">Montant (€)<input id="v-amount" type="text" inputmode="decimal" required></label></div>
-      <label class="field">Depuis (placement de départ)<select id="v-from">${opt(pl, '')}</select></label>
+      <div class="row"><label class="field">Date<input id="v-date" type="date" value="${esc(pre.date || today())}" required></label>
+      <label class="field">Montant (€)<input id="v-amount" type="text" inputmode="decimal" value="${esc(pre.amount || '')}" required></label></div>
+      <label class="field">Depuis (placement de départ)<select id="v-from">${opt(pl, fromSel)}</select></label>
       <label class="field">En passant par (compte courant)<select id="v-via">${opt(cur, p.from)}</select></label>
-      <label class="field">Vers (placement d'arrivée)<select id="v-to">${opt(pl, (pl[1] || {}).id)}</select></label>
+      <label class="field">Vers (placement d'arrivée)<select id="v-to">${opt(pl, toSel)}</select></label>
       <label class="field">Note (facultatif)<input id="v-note" type="text" placeholder="ex. du PEA vers le compte-titres"></label>
       <p class="small muted">Les enveloppes ne bougent pas. Le Mac enregistrera les deux virements : départ → compte courant, puis compte courant → arrivée.</p>
-      <div class="row"><button type="button" class="btn-ghost" onclick="moveOpen=false;render()">Annuler</button><button type="submit" class="btn-primary">Noter ce déplacement</button></div>
+      <div class="row"><button type="button" class="btn-ghost" onclick="moveOpen=false;movePre=null;render()">Annuler</button><button type="submit" class="btn-primary">Noter ce déplacement</button></div>
     </form>`;
 }
 async function addMove(ev) {
@@ -408,7 +421,7 @@ async function addMove(ev) {
   const it = { id: newId(), type: 'transit', date: $('v-date').value, amount, from: $('v-from').value, via: $('v-via').value, to: $('v-to').value, note: $('v-note').value.trim(), createdAt: new Date().toISOString() };
   if (!(amount > 0) || !it.date || !it.from || !it.via || !it.to || it.from === it.to) { notice = { kind: 'bad', text: 'Vérifiez le montant, la date et les comptes : le placement de départ et celui d\'arrivée doivent être différents.' }; render(); return; }
   queue.push(it); await saveQueue();
-  moveOpen = false; notice = { kind: 'ok', text: `Déplacement de ${eur(amount)} noté (${accName(it.from)} → ${accName(it.via)} → ${accName(it.to)}). Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
+  moveOpen = false; movePre = null; notice = { kind: 'ok', text: `Déplacement de ${eur(amount)} noté (${accName(it.from)} → ${accName(it.via)} → ${accName(it.to)}). Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
   render();
 }
 async function addRecordMonth(m) { if (exampleGuard()) return; queue.push({ id: newId(), type: 'recordMonth', month: m, createdAt: new Date().toISOString() }); await saveQueue(); notice = { kind: 'ok', text: 'Provisions du mois notées : envoyez-les au Mac.' }; render(); }
@@ -455,7 +468,7 @@ async function sendToMac() {
 async function copyFallback() { const t = $('fallback'); if (!t) return; try { await navigator.clipboard.writeText(t.value); notice = { kind: 'ok', text: 'Copié.' }; } catch (e) { t.select(); } render(); }
 
 // ---------- Affichage ----------
-function go(v) { view = v; formOpen = false; useOpen = false; moveOpen = false; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
+function go(v) { view = v; formOpen = false; useOpen = false; moveOpen = false; movePre = null; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
 function setSel(m, on) { on ? monthSel.add(m) : monthSel.delete(m); const t = $('t-amount'); if (t) { t.value = selTotal() || ''; renderTotal(); } else render(); }
 function selTotal() { return (data.months || []).filter(m => monthSel.has(m.month)).reduce((s, m) => s + (m.pending || 0), 0); }
 function renderTotal() { const e = $('sel-total'); if (e) e.textContent = eur(selTotal()); }
@@ -468,7 +481,7 @@ function openForm() { formOpen = true; render(); setTimeout(() => { const a = $(
 function transferForm(p) { return `<form class="panel" style="border-style:dashed" onsubmit="addTransfer(event)">
       <div class="row"><label class="field">Date du virement<input id="t-date" type="date" value="${today()}" required></label>
       <label class="field">Montant (€)<input id="t-amount" type="text" inputmode="decimal" value="${selTotal() || ''}" oninput="this.dataset.touched=1" required></label></div>
-      <label class="field">Depuis<select id="t-from">${accountOptions(p.from, a => a.current)}</select></label>
+      <label class="field">Depuis<select id="t-from" onchange="tFromPick(this)">${accountOptions(p.from, a => a.current)}<optgroup label="Depuis un placement (PEA, livret…)">${accountOptions('', a => !a.current && !a.debt)}</optgroup></select><span class="small muted" id="t-from-hint">L'argent part d'un PEA ou d'un livret ? Choisissez-le en bas de cette liste.</span></label>
       <label class="field">Vers<select id="t-to">${accountOptions(p.to, a => !a.current && !a.debt)}</select></label>
       ${(data.envelopes || []).length ? `<div class="field">Enveloppes à créditer <span class="small muted">(virement hors plan mensuel, ou en plus des mois cochés)</span>
         <div class="list">${data.envelopes.map((e, i) => `<div><span class="name">${esc(e.name)}<span class="small muted"> · solde ${eur(e.balance)}</span></span><input id="t-e${i}" type="text" inputmode="decimal" placeholder="0" oninput="tEnvSync()" style="width:6.5rem;text-align:right"></div>`).join('')}</div></div>` : ''}
@@ -505,7 +518,7 @@ function viewMonth() {
   </div>
   <div class="panel" id="move-panel"><div class="top"><h2>Déplacer des provisions</h2></div>
     <p class="small muted">Vous déplacez de l'argent d'un placement vers un autre (par exemple du PEA vers le compte-titres) en passant par le compte courant ? Notez-le ici : les enveloppes ne bougent pas, elles changent seulement de placement.</p>
-    ${!canTransit() ? `<p class="small muted"><b>Indisponible pour l'instant</b> : il faut d'abord MyFinance version 7100 ou plus récente sur le Mac, puis rouvrir ici le fichier du Mac.</p>` : moveOpen ? moveForm() : `<button class="btn-primary" onclick="${data && data.example ? 'exampleGuard()' : 'moveOpen=true;formOpen=false;useOpen=false;render()'}">Déplacer des provisions</button>`}
+    ${!canTransit() ? `<p class="small muted"><b>Indisponible pour l'instant</b> : il faut d'abord MyFinance version 7100 ou plus récente sur le Mac, puis rouvrir ici le fichier du Mac.</p>` : moveOpen ? moveForm() : `<button class="btn-primary" onclick="${data && data.example ? 'exampleGuard()' : 'movePre=null;moveOpen=true;formOpen=false;useOpen=false;render()'}">Déplacer des provisions</button>`}
   </div>
   <div class="panel"><h2>Mois par mois</h2><div class="list">${months.map(m => `<div><span class="name"><b>${esc(m.label)}</b>${(m.transfers || []).length ? `<span class="small muted"> · ${m.transfers.map(t => `${dfr(t.date)} ${esc(accName(t.from))} → ${esc(accName(t.to))}`).join(' · ')}</span>` : ''}</span>
     <span>${m.missing ? '<span class="chip bad">manquant</span>' : m.done ? '<span class="chip ok">✓ viré</span>' : `<span class="chip warn">${eur(m.pending)} à virer</span>`}</span></div>`).join('') || '<div class="muted">Aucun mois.</div>'}</div></div>
@@ -699,7 +712,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.8.0 du 18/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.8.1 du 18/11/2026</p>`;
 }
 // ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
 // À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
