@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.8.1 du 18/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.9.0 du 22/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -424,6 +424,148 @@ async function addMove(ev) {
   moveOpen = false; movePre = null; notice = { kind: 'ok', text: `Déplacement de ${eur(amount)} noté (${accName(it.from)} → ${accName(it.via)} → ${accName(it.to)}). Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
   render();
 }
+// ===== MF Poche 1.9.0 : ACHAT EN PLUSIEURS FOIS (échéancier saisi ou lu dans le texte d'une capture d'écran) =====
+// Demande de Pascal (22/11/2026) : saisir sur l'iPhone l'échéancier d'un achat payé en plusieurs mensualités (Klarna, PayPal…),
+// à la main ou à partir d'une capture, pour alimenter l'Échéancier de MyFinance. Rien ne quitte l'iPhone : le texte de la capture
+// est copié par l'iPhone lui-même (appui long sur l'image › Copier le texte), puis collé ici.
+const INST_ORGS = ['Klarna', 'PayPal', 'Alma', 'Oney', 'Cofidis', 'Floa', 'Carte bancaire', 'Autre'];
+let instOpen = false, inst = null;
+const canInst = () => !!(data && Array.isArray(data.caps) && data.caps.includes('installments'));
+function instNew() {
+  let org = 'Klarna'; try { org = localStorage.getItem('mf-inst-org') || org; } catch (e) {}
+  return { merchant: '', org: INST_ORGS.includes(org) ? org : 'Autre', orgOther: INST_ORGS.includes(org) ? '' : org, account: (data.plan || {}).from || ((data.accounts || []).find(a => a.current) || {}).id || '', total: '', n: '4', first: today(), fees: '', paste: '', rows: [], note: '', msg: '' };
+}
+const instOrg = () => inst.org === 'Autre' ? (inst.orgOther || '').trim() : inst.org;
+const instR2 = n => Math.round(n * 100) / 100;
+function instAddMonths(d, k) {
+  const y = +d.slice(0, 4), m = +d.slice(5, 7) - 1 + k, day = +d.slice(8, 10), yy = y + Math.floor(m / 12), mm = ((m % 12) + 12) % 12, last = new Date(yy, mm + 1, 0).getDate();
+  return yy + '-' + String(mm + 1).padStart(2, '0') + '-' + String(Math.min(day, last)).padStart(2, '0');
+}
+// Répartition : mensualités égales, les centimes de reste et les frais sur la première
+function instSplit(total, n, first, fees) {
+  total = instR2(total); n = Math.max(1, Math.min(48, Math.round(n))); fees = instR2(fees || 0);
+  const base = Math.floor(total * 100 / n) / 100, rest = instR2(total - base * n), rows = [];
+  for (let k = 0; k < n; k++) rows.push({ date: instAddMonths(first, k), amount: instR2(base + (k === 0 ? rest + fees : 0)) });
+  return rows;
+}
+// ---- Lecture du texte d'une capture d'écran ----
+const INST_MOIS = { janv: 1, jan: 1, janvier: 1, january: 1, fev: 2, fevr: 2, fevrier: 2, feb: 2, february: 2, mars: 3, mar: 3, march: 3, avr: 4, avril: 4, apr: 4, april: 4, mai: 5, may: 5, juin: 6, jun: 6, june: 6, juil: 7, juillet: 7, jul: 7, july: 7, aout: 8, aug: 8, august: 8, sept: 9, sep: 9, septembre: 9, september: 9, oct: 10, octobre: 10, october: 10, nov: 11, novembre: 11, november: 11, dec: 12, decembre: 12, december: 12 };
+const instNorm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[  ]/g, ' ');
+function instAmount(s) {
+  s = String(s).replace(/\s/g, '');
+  const c = s.lastIndexOf(','), p = s.lastIndexOf('.');
+  if (c >= 0 && p >= 0) s = c > p ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (c >= 0) s = s.replace(',', '.');
+  else if (p >= 0 && s.length - p - 1 === 3 && s.indexOf('.') === p) s = s.replace('.', '');
+  const n = Number(s); return isFinite(n) ? instR2(n) : 0;
+}
+function instParse(text, ref) {
+  ref = ref || today();
+  const ry = +ref.slice(0, 4), iso = (y, m, d) => y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  const mk = (d, m, y) => { d = +d; m = +m; if (!(d >= 1 && d <= 31 && m >= 1 && m <= 12)) return null; if (y != null && y !== '') { y = +y; if (y < 100) y += 2000; return { date: iso(y, m, d), year: true }; } return { date: iso(ry, m, d), year: false }; };
+  const months = Object.keys(INST_MOIS).sort((a, b) => b.length - a.length).join('|');
+  const reA = /(^|[^\d,.])(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?![\d,.])/, reA2 = /(^|[^\d,.])(\d{1,2})[.\-](\d{1,2})[.\-](\d{4})(?!\d)/;
+  const reB = new RegExp('(^|[^\\d])(\\d{1,2})(?:er)?\\s+(' + months + ')\\.?(?:\\s+(\\d{4}))?(?![a-z])'), reC = new RegExp('(^|[^a-z])(' + months + ')\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?(?!\\d)');
+  const NB = '\\d{1,3}(?:[ .]\\d{3})+(?:,\\d{1,2})?|\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?';
+  const reAmt = new RegExp('(?:€|eur)\\s*(' + NB + ')|(' + NB + ')\\s*(?:€|eur\\b|euros?\\b)', 'g');
+  const rows = [], out = { rows, total: 0, n: 0, per: 0, warn: [] };
+  let pendDate = null, pendAmt = 0, prev = '';
+  instNorm(text).split(/\r?\n/).forEach(raw => {
+    let line = raw.trim(); if (!line) return;
+    const mult = line.match(/(\d{1,2})\s*(?:x|×|fois|paiements?|mensualites?|echeances?|versements?)\s*(?:de\s*)?(?:€\s*)?(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur)?/);
+    if (mult && +mult[1] >= 2 && +mult[1] <= 48 && /€|eur/.test(line)) { out.n = +mult[1]; out.per = instAmount(mult[2]); }
+    const enN = line.match(/\ben\s+(\d{1,2})\s*(?:x|fois)\b/); if (enN && !out.n) out.n = +enN[1];
+    let d = null, m;
+    if (/aujourd'?hui|today|ce jour/.test(line)) d = { date: ref, year: true };
+    else if ((m = line.match(reA2))) { d = mk(m[2], m[3], m[4]); if (d) line = line.replace(m[0], ' '); }
+    else if ((m = line.match(reA))) { d = mk(m[2], m[3], m[4]); if (d) line = line.replace(m[0], ' '); }
+    else if ((m = line.match(reB))) { d = mk(m[2], INST_MOIS[m[3]], m[4]); if (d) line = line.replace(m[0], ' '); }
+    else if ((m = line.match(reC))) { d = mk(m[3], INST_MOIS[m[2]], m[4]); if (d) line = line.replace(m[0], ' '); }
+    const amts = []; let a; reAmt.lastIndex = 0;
+    while ((a = reAmt.exec(line))) { const v = instAmount(a[1] || a[2]); if (v > 0) amts.push(v); }
+    const isTotal = /total|montant de (l'achat|la commande)|prix|sous-total|commande n|deja paye|reste a payer|frais|taeg|interets/.test(line);
+    if (isTotal) { if (/total|montant de/.test(line) && amts.length) out.total = Math.max(out.total, amts[amts.length - 1]); if (!d) return; }
+    if (mult && !d) return;
+    const amt = amts.length ? amts[amts.length - 1] : 0;
+    if (d && amt) { rows.push({ date: d.date, amount: amt, year: d.year }); pendDate = null; pendAmt = 0; }
+    else if (d) { if (pendAmt) { rows.push({ date: d.date, amount: pendAmt, year: d.year }); pendAmt = 0; } else pendDate = d; }
+    else if (amt) { if (pendDate) { rows.push({ date: pendDate.date, amount: amt, year: pendDate.year }); pendDate = null; } else pendAmt = amt; }
+  });
+  // Année absente de la capture : on suppose des dates à venir, dans l'ordre
+  rows.forEach(r => { if (!r.year) { let y = +r.date.slice(0, 4); const lim = prev || instAddMonths(ref, -1); while (r.date < lim && y < ry + 4) { y++; r.date = y + r.date.slice(4); } } prev = r.date; delete r.year; });
+  rows.sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : 0);
+  if (!rows.length && out.n && out.per) { instSplit(out.per * out.n, out.n, ref, 0).forEach(r => rows.push(r)); out.warn.push('dates supposées : une mensualité par mois à partir d\'aujourd\'hui'); }
+  const sum = instR2(rows.reduce((s, r) => s + r.amount, 0));
+  if (out.total && rows.length && Math.abs(sum - out.total) > 0.05) out.warn.push('le total lu (' + eur(out.total) + ') ne correspond pas à la somme des échéances (' + eur(sum) + ')');
+  if (out.n && rows.length && rows.length !== out.n) out.warn.push(out.n + ' mensualités annoncées, ' + rows.length + ' trouvées');
+  return out;
+}
+// ---- Formulaire ----
+function instSet(k, v) { inst[k] = v; }
+function instCalc() {
+  const total = num(inst.total), n = Math.round(num(inst.n));
+  if (!(total > 0) || !(n >= 1) || !inst.first) { inst.msg = 'Indiquez le montant total, le nombre de mensualités et la date de la première.'; render(); return; }
+  inst.rows = instSplit(total, n, inst.first, num(inst.fees)); inst.msg = ''; render();
+}
+function instRead() {
+  const r = instParse(inst.paste, today());
+  if (!r.rows.length) { inst.msg = 'Aucune échéance reconnue dans ce texte. Vérifiez que les dates et les montants ont bien été copiés, ou utilisez le calcul ci-dessus.'; render(); return; }
+  inst.rows = r.rows; if (r.total) inst.total = String(r.total).replace('.', ','); inst.n = String(r.rows.length); inst.first = r.rows[0].date;
+  inst.msg = r.rows.length + ' échéance(s) lue(s)' + (r.warn.length ? ' — à vérifier : ' + r.warn.join(' ; ') : '') + '. Contrôlez chaque ligne avant de noter.';
+  render();
+}
+function instRow(i, k, v) { if (!inst.rows[i]) return; inst.rows[i][k] = k === 'amount' ? num(v) : v; const s = $('inst-sum'); if (s) s.textContent = instSumText(); }
+function instRowAdd() { const L = inst.rows, last = L[L.length - 1]; L.push({ date: last ? instAddMonths(last.date, 1) : today(), amount: last ? last.amount : 0 }); render(); }
+function instRowDel(i) { inst.rows.splice(i, 1); render(); }
+function instSumText() { const s = instR2(inst.rows.reduce((a, r) => a + (Number(r.amount) || 0), 0)), t = num(inst.total), f = num(inst.fees); return inst.rows.length + ' échéance(s) · total ' + eur(s) + (t > 0 && Math.abs(s - t - f) > 0.05 ? ' · écart de ' + eur(s - t - f) + ' avec le montant indiqué' : ''); }
+function instForm() {
+  const cur = (data.accounts || []).filter(a => a.current), v = k => esc(inst[k] || '');
+  return `<form class="panel" style="border-style:dashed" onsubmit="addInst(event)">
+      <label class="field">Achat (marchand, objet)<input id="i-merchant" type="text" value="${v('merchant')}" oninput="instSet('merchant',this.value)" placeholder="ex. Fnac, téléviseur" required></label>
+      <div class="row"><label class="field">Payé via<select id="i-org" onchange="instSet('org',this.value);render()">${INST_ORGS.map(o => `<option ${o === inst.org ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>
+      ${inst.org === 'Autre' ? `<label class="field">Lequel ?<input id="i-orgother" type="text" value="${v('orgOther')}" oninput="instSet('orgOther',this.value)" placeholder="ex. Younited"></label>` : ''}</div>
+      <label class="field">Compte prélevé<select id="i-account" onchange="instSet('account',this.value)">${cur.map(a => `<option value="${esc(a.id)}" ${a.id === inst.account ? 'selected' : ''}>${esc(a.name)} — ${esc(a.bank)}${a.num ? ' …' + esc(a.num) : ''}</option>`).join('')}</select></label>
+      <div class="panel" style="margin:0;padding:10px"><b class="small">1. Calculer les échéances</b>
+        <div class="row"><label class="field">Montant total (€)<input id="i-total" type="text" inputmode="decimal" value="${v('total')}" oninput="instSet('total',this.value)"></label>
+        <label class="field">Mensualités<input id="i-n" type="text" inputmode="numeric" value="${v('n')}" oninput="instSet('n',this.value)"></label></div>
+        <div class="row"><label class="field">Date de la première<input id="i-first" type="date" value="${v('first')}" onchange="instSet('first',this.value)"></label>
+        <label class="field">Frais (€, facultatif)<input id="i-fees" type="text" inputmode="decimal" value="${v('fees')}" oninput="instSet('fees',this.value)"></label></div>
+        <button type="button" class="btn-primary" id="i-calc" onclick="instCalc()">Calculer les échéances</button></div>
+      <div class="panel" style="margin:0;padding:10px"><b class="small">2. Ou coller le texte d'une capture d'écran</b>
+        <p class="small muted">Dans Photos, ouvrez la capture, faites un appui long sur le texte, « Tout sélectionner », « Copier » ; puis collez ici. Rien ne quitte l'iPhone.</p>
+        <textarea id="i-paste" rows="4" style="width:100%" oninput="instSet('paste',this.value)" placeholder="Collez ici le texte de la capture">${v('paste')}</textarea>
+        <button type="button" class="btn-primary" id="i-read" onclick="instRead()">Lire les échéances du texte</button></div>
+      ${inst.msg ? `<div class="banner info" id="inst-msg">${esc(inst.msg)}</div>` : ''}
+      ${inst.rows.length ? `<div id="inst-rows"><b class="small">Les échéances (modifiables)</b>
+        ${inst.rows.map((r, i) => `<div style="display:grid;grid-template-columns:1.35fr 1fr auto;gap:8px;align-items:end;margin-top:6px"><label class="field">${i + 1}<input type="date" value="${esc(r.date)}" onchange="instRow(${i},'date',this.value)"></label>
+          <label class="field">€<input type="text" inputmode="decimal" value="${esc((Number(r.amount) || 0).toFixed(2).replace('.', ','))}" oninput="instRow(${i},'amount',this.value)"></label>
+          <button type="button" class="btn-ghost btn-danger" style="padding:10px 12px" onclick="instRowDel(${i})" aria-label="Retirer cette échéance">✕</button></div>`).join('')}
+        <button type="button" class="btn-ghost" onclick="instRowAdd()">+ Ajouter une échéance</button>
+        <p class="small" id="inst-sum">${esc(instSumText())}</p></div>` : ''}
+      <label class="field">Note (facultatif)<input id="i-note" type="text" value="${v('note')}" oninput="instSet('note',this.value)" placeholder="ex. commande du 22/11"></label>
+      <div class="row"><button type="button" class="btn-ghost" onclick="instOpen=false;render()">Annuler</button><button type="submit" class="btn-primary" ${inst.rows.length ? '' : 'disabled'}>Noter cet échéancier</button></div>
+    </form>`;
+}
+async function addInst(ev) {
+  ev.preventDefault();
+  if (exampleGuard()) return;
+  const org = instOrg(), rows = inst.rows.map(r => ({ date: r.date, amount: instR2(Number(r.amount) || 0) })).sort((a, b) => a.date < b.date ? -1 : 1);
+  if (!inst.merchant.trim() || !org || !inst.account || !rows.length || rows.some(r => !/^\d{4}-\d{2}-\d{2}$/.test(r.date) || !(r.amount > 0))) { inst.msg = 'Vérifiez l\'achat, l\'organisme, le compte, et que chaque échéance a une date et un montant.'; render(); return; }
+  const total = instR2(rows.reduce((s, r) => s + r.amount, 0));
+  const it = { id: newId(), type: 'installments', merchant: inst.merchant.trim(), org, account: inst.account, total, items: rows, note: (inst.note || '').trim(), createdAt: new Date().toISOString() };
+  queue.push(it); await saveQueue();
+  try { localStorage.setItem('mf-inst-org', org); } catch (e) {}
+  instOpen = false; inst = null;
+  notice = { kind: 'ok', text: `Échéancier noté : ${it.merchant} via ${org}, ${rows.length} échéance(s), ${eur(total)}. Pensez à l'envoyer au Mac (onglet « Envoyer »).` };
+  render();
+}
+function instPanel() {
+  return `<div class="panel" id="inst-panel"><div class="top"><h2>Achat en plusieurs fois</h2></div>
+    <p class="small muted">Un achat payé en 3, 4 ou 10 fois (Klarna, PayPal, Alma…) ? Notez ses échéances ici : le Mac les ajoutera à l'Échéancier, et vous verrez venir chaque prélèvement.</p>
+    ${!canInst() ? `<p class="small muted"><b>Indisponible pour l'instant</b> : il faut d'abord MyFinance version 7700 ou plus récente sur le Mac, puis rouvrir ici le fichier du Mac.</p>` : instOpen && inst ? instForm() : `<button class="btn-primary" id="inst-open" onclick="${data && data.example ? 'exampleGuard()' : 'inst=instNew();instOpen=true;formOpen=false;useOpen=false;moveOpen=false;render()'}">🛒 Noter un achat en plusieurs fois</button>`}
+  </div>`;
+}
+
 async function addRecordMonth(m) { if (exampleGuard()) return; queue.push({ id: newId(), type: 'recordMonth', month: m, createdAt: new Date().toISOString() }); await saveQueue(); notice = { kind: 'ok', text: 'Provisions du mois notées : envoyez-les au Mac.' }; render(); }
 async function removeItem(id) { queue = queue.filter(i => i.id !== id); await saveQueue(); render(); }
 async function clearQueue() { queue = []; confirmClear = false; await saveQueue(); notice = { kind: 'ok', text: 'Liste vidée.' }; render(); }
@@ -468,7 +610,7 @@ async function sendToMac() {
 async function copyFallback() { const t = $('fallback'); if (!t) return; try { await navigator.clipboard.writeText(t.value); notice = { kind: 'ok', text: 'Copié.' }; } catch (e) { t.select(); } render(); }
 
 // ---------- Affichage ----------
-function go(v) { view = v; formOpen = false; useOpen = false; moveOpen = false; movePre = null; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
+function go(v) { view = v; formOpen = false; useOpen = false; moveOpen = false; movePre = null; instOpen = false; confirmForget = false; render(); if (v === 'queue' && queue.length && data && !data.example) buildOut().catch(() => {}); }
 function setSel(m, on) { on ? monthSel.add(m) : monthSel.delete(m); const t = $('t-amount'); if (t) { t.value = selTotal() || ''; renderTotal(); } else render(); }
 function selTotal() { return (data.months || []).filter(m => monthSel.has(m.month)).reduce((s, m) => s + (m.pending || 0), 0); }
 function renderTotal() { const e = $('sel-total'); if (e) e.textContent = eur(selTotal()); }
@@ -520,6 +662,7 @@ function viewMonth() {
     <p class="small muted">Vous déplacez de l'argent d'un placement vers un autre (par exemple du PEA vers le compte-titres) en passant par le compte courant ? Notez-le ici : les enveloppes ne bougent pas, elles changent seulement de placement.</p>
     ${!canTransit() ? `<p class="small muted"><b>Indisponible pour l'instant</b> : il faut d'abord MyFinance version 7100 ou plus récente sur le Mac, puis rouvrir ici le fichier du Mac.</p>` : moveOpen ? moveForm() : `<button class="btn-primary" onclick="${data && data.example ? 'exampleGuard()' : 'movePre=null;moveOpen=true;formOpen=false;useOpen=false;render()'}">Déplacer des provisions</button>`}
   </div>
+  ${instPanel()}
   <div class="panel"><h2>Mois par mois</h2><div class="list">${months.map(m => `<div><span class="name"><b>${esc(m.label)}</b>${(m.transfers || []).length ? `<span class="small muted"> · ${m.transfers.map(t => `${dfr(t.date)} ${esc(accName(t.from))} → ${esc(accName(t.to))}`).join(' · ')}</span>` : ''}</span>
     <span>${m.missing ? '<span class="chip bad">manquant</span>' : m.done ? '<span class="chip ok">✓ viré</span>' : `<span class="chip warn">${eur(m.pending)} à virer</span>`}</span></div>`).join('') || '<div class="muted">Aucun mois.</div>'}</div></div>
   <div class="panel"><h2>Derniers virements</h2><div class="list">${(data.transfers || []).slice(0, 12).map(t => `<div><span class="name">${dfr(t.date)} · ${esc(accName(t.from))} → ${esc(accName(t.to))}${t.provisions ? ' <span class="chip info">provisions</span>' : ''}</span><span class="money">${eur(t.amount)}</span></div>`).join('') || '<div class="muted">Aucun virement récent.</div>'}</div></div>`;
@@ -527,10 +670,10 @@ function viewMonth() {
 function viewQueue() {
   if (!data) return viewFile();
   return `<div class="panel"><div class="top"><h2>À envoyer au Mac</h2><span class="chip ${queue.length ? 'warn' : 'ok'}">${queue.length} élément(s)</span></div>
-    <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transit' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">déplacement</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.via))} → ${esc(accName(i.to))}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${(i.lines || []).length ? ' · ' + i.lines.map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
+    <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'installments' ? `<b>${eur(i.total)}</b> en ${(i.items || []).length} fois <span class="chip info">achat en plusieurs fois</span><br><span class="small muted">${esc(i.merchant)} via ${esc(i.org)} · ${esc(accName(i.account))} · du ${dfr(((i.items || [])[0] || {}).date)} au ${dfr(((i.items || [])[(i.items || []).length - 1] || {}).date)}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transit' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">déplacement</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.via))} → ${esc(accName(i.to))}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${(i.lines || []).length ? ' · ' + i.lines.map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
       <button class="btn-ghost btn-danger" style="padding:6px 10px" onclick="removeItem('${esc(i.id)}')" aria-label="Retirer">Retirer</button></div>`).join('') || '<div class="muted">Rien à envoyer. Notez un virement dans « Ce mois ».</div>'}</div>
     <button class="btn-primary" onclick="sendToMac()" ${queue.length ? '' : 'disabled'}>Envoyer au Mac (fichier pour OneDrive)</button>
-    <p class="small muted">Dans la feuille de partage : « Enregistrer dans Fichiers » › Parcourir › OneDrive › … › Banques › MyFinance › <b>iPhone</b>. Le Mac lit ce dossier toutes les 2 minutes quand MyFinance est ouvert.</p>
+    <p class="small muted">Dans la feuille de partage : « Enregistrer dans Fichiers » › Parcourir › OneDrive › MyFinance › <b>iPhone</b>. Le Mac lit ce dossier toutes les 2 minutes quand MyFinance est ouvert.</p>
     ${confirmClear && queue.length ? `<div class="banner info">Le fichier est bien dans OneDrive ? <button style="padding:6px 10px;margin-left:6px" onclick="clearQueue()">Oui, vider la liste</button></div>` : ''}
     ${showFallback ? `<textarea id="fallback" class="code" readonly>${esc(outCache ? outCache.text : '')}</textarea>
     <button onclick="copyFallback()">Copier le texte</button>` : ''}
@@ -712,7 +855,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.8.1 du 18/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.9.0 du 22/11/2026</p>`;
 }
 // ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
 // À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
