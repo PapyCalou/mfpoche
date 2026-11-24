@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.9.2 du 24/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.10.0 du 24/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -691,8 +691,8 @@ function viewMonth() {
   <div class="panel"><h2>Derniers virements</h2><div class="list">${(data.transfers || []).slice(0, 12).map(t => `<div><span class="name">${dfr(t.date)} · ${esc(accName(t.from))} → ${esc(accName(t.to))}${t.provisions ? ' <span class="chip info">provisions</span>' : ''}</span><span class="money">${eur(t.amount)}</span></div>`).join('') || '<div class="muted">Aucun virement récent.</div>'}</div></div>`;
 }
 function viewQueue() {
-  if (!data) return viewFile();
-  return `<div class="panel"><div class="top"><h2>À envoyer au Mac</h2><span class="chip ${queue.length ? 'warn' : 'ok'}">${queue.length} élément(s)</span></div>
+  if (!data) return scanPanel() + viewFile();
+  return scanPanel() + `<div class="panel"><div class="top"><h2>À envoyer au Mac</h2><span class="chip ${queue.length ? 'warn' : 'ok'}">${queue.length} élément(s)</span></div>
     <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'installments' ? `<b>${eur(i.total)}</b> en ${(i.items || []).length} fois <span class="chip info">achat en plusieurs fois</span><br><span class="small muted">${esc(i.merchant)} via ${esc(i.org)} · ${esc(accName(i.account))} · du ${dfr(((i.items || [])[0] || {}).date)} au ${dfr(((i.items || [])[(i.items || []).length - 1] || {}).date)}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transit' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">déplacement</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.via))} → ${esc(accName(i.to))}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${(i.lines || []).length ? ' · ' + i.lines.map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
       <button class="btn-ghost btn-danger" style="padding:6px 10px" onclick="removeItem('${esc(i.id)}')" aria-label="Retirer">Retirer</button></div>`).join('') || '<div class="muted">Rien à envoyer. Notez un virement dans « Ce mois ».</div>'}</div>
     <button class="btn-primary" onclick="sendToMac()" ${queue.length ? '' : 'disabled'}>Envoyer au Mac (fichier pour OneDrive)</button>
@@ -880,7 +880,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.9.2 du 24/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.10.0 du 24/11/2026</p>`;
 }
 // ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
 // À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
@@ -908,6 +908,82 @@ function render() {
   $('view').innerHTML = (data && data.example ? `<div class="banner example">Exemple : ces chiffres sont fictifs. Ouvrez votre fichier dans l'onglet « Fichier ».</div>` : '')
     + (notice ? `<div class="banner ${notice.kind}" role="status">${esc(notice.text)}</div>` : '') + body;
   blurMark(); blurPaint();
+}
+
+// ---------- 1.10.0 : scanner un document et l'envoyer dans « À traiter » ----------
+// Les photos sont réduites (1 754 points au plus), réunies dans un seul PDF fabriqué ici, puis remises à la feuille de partage :
+// l'utilisateur choisit OneDrive › MyFinance › À traiter. Rien n'est envoyé ailleurs, rien n'est gardé dans l'application.
+let scan = { pages: [], label: '', busy: false, msg: '' };
+const SCAN_MAX = 1754;
+async function scanLoad(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ko(new Error('image illisible')); i.src = url; });
+    const k = Math.min(1, SCAN_MAX / Math.max(img.naturalWidth, img.naturalHeight)), w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.72));
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), w, h, thumb: c.toDataURL('image/jpeg', 0.3) };
+  } finally { URL.revokeObjectURL(url); }
+}
+async function scanAdd(input) {
+  const files = [...(input.files || [])]; input.value = ''; if (!files.length) return;
+  scan.busy = true; scan.msg = ''; render();
+  for (const f of files) { try { scan.pages.push(await scanLoad(f)); } catch (e) { scan.msg = 'Une image n\'a pas pu être lue.'; } }
+  scan.busy = false; render();
+}
+function scanDrop(i) { scan.pages.splice(i, 1); render(); }
+function scanReset() { scan = { pages: [], label: '', busy: false, msg: '' }; render(); }
+// PDF minimal : une page par image JPEG, largeur A4 (595 points)
+function scanPdf(pages) {
+  const enc = new TextEncoder(), parts = [], offs = []; let len = 0;
+  const put = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, body, stream) => { offs[n] = len; put(`${n} 0 obj\n${body}\n`); if (stream) { put('stream\n'); put(stream); put('\nendstream\n'); } put('endobj\n'); };
+  put('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  const n = pages.length, kids = pages.map((p, i) => `${3 + 3 * i} 0 R`).join(' ');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Kids [${kids}] /Count ${n} >>`);
+  pages.forEach((p, i) => { const P = 3 + 3 * i, C = P + 1, I = P + 2, H = Math.round(595 * p.h / p.w * 100) / 100, cs = enc.encode(`q 595 0 0 ${H} 0 0 cm /Im0 Do Q`);
+    obj(P, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 ${H}] /Resources << /XObject << /Im0 ${I} 0 R >> >> /Contents ${C} 0 R >>`);
+    obj(C, `<< /Length ${cs.length} >>`, cs);
+    obj(I, `<< /Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.bytes.length} >>`, p.bytes); });
+  const total = 2 + 3 * n, xref = len;
+  put(`xref\n0 ${total + 1}\n0000000000 65535 f \n`);
+  for (let k = 1; k <= total; k++) put(String(offs[k]).padStart(10, '0') + ' 00000 n \n');
+  put(`trailer\n<< /Size ${total + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  const out = new Uint8Array(len); let o = 0; parts.forEach(b => { out.set(b, o); o += b.length; });
+  return out;
+}
+function scanName(label, now) {
+  const d = now || new Date(), p = n => String(n).padStart(2, '0'), stamp = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  const clean = String(label || '').normalize('NFC').replace(/[\\/:*?"<>|\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return `Scan ${stamp}${clean ? ' - ' + clean : ''}.pdf`;
+}
+async function scanSend() {
+  if (!scan.pages.length || scan.busy) return;
+  const l = $('scan-label'); if (l) scan.label = l.value;
+  const bytes = scanPdf(scan.pages), name = scanName(scan.label);
+  let file = null; try { file = new File([bytes], name, { type: 'application/pdf' }); } catch (e) {}
+  if (file && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] });
+      const n = scan.pages.length; scan = { pages: [], label: '', busy: false, msg: '' };
+      notice = { kind: 'ok', text: `Document de ${n} page(s) transmis. S'il est bien dans OneDrive › MyFinance › À traiter, le Mac le proposera dans « À faire » d'ici 2 minutes (MyFinance ouvert).` }; render(); return; }
+    catch (e) { if (e && e.name === 'AbortError') { notice = { kind: 'info', text: 'Envoi annulé : vos pages sont toujours là.' }; render(); return; } }
+  }
+  try { const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000); } catch (e) {}
+  notice = { kind: 'info', text: `Le partage n'est pas disponible ici : « ${name} » a été téléchargé (app Fichiers › Téléchargements). Déplacez-le dans OneDrive › MyFinance › À traiter.` }; render();
+}
+function scanPanel() {
+  const n = scan.pages.length;
+  return `<div class="panel" id="scan-panel"><div class="top"><h2>📷 Scanner un document</h2>${n ? `<span class="chip warn">${n} page(s)</span>` : ''}</div>
+    <p class="small muted">Photographiez chaque page (facture, courrier, relevé). MF Poche en fait un seul PDF et vous le fait déposer dans <b>OneDrive › MyFinance › À traiter</b> : MyFinance le range ou le lit sur le Mac, sans passer par un e-mail.</p>
+    ${n ? `<div class="list">${scan.pages.map((p, i) => `<div><span class="name"><img src="${p.thumb}" alt="page ${i + 1}" style="height:64px;border:1px solid var(--line);border-radius:6px;vertical-align:middle;margin-right:8px">Page ${i + 1}</span><button class="btn-ghost btn-danger" style="padding:6px 10px" onclick="scanDrop(${i})">Retirer</button></div>`).join('')}</div>` : ''}
+    ${scan.busy ? '<p class="small">Préparation de l\'image…</p>' : ''}${scan.msg ? `<p class="small" style="color:var(--bad)">${esc(scan.msg)}</p>` : ''}
+    <div class="row"><label class="btn ${n ? 'btn-ghost' : 'btn-primary'}" style="flex:1">📷 ${n ? 'Ajouter une page' : 'Photographier'}<input type="file" id="scan-cam" accept="image/*" capture="environment" onchange="scanAdd(this)" hidden></label>
+      <label class="btn btn-ghost" style="flex:1">🖼 Depuis Photos<input type="file" id="scan-lib" accept="image/*" multiple onchange="scanAdd(this)" hidden></label></div>
+    ${n ? `<label class="small" style="display:block;margin-top:10px">De quoi s'agit-il ? (facultatif, aide le Mac à le ranger)<input id="scan-label" type="text" value="${esc(scan.label)}" oninput="scan.label=this.value" placeholder="Facture plombier, avis d'impôt…" style="width:100%;margin-top:4px"></label>
+    <button class="btn-primary" id="scan-send" onclick="scanSend()" style="margin-top:10px">Envoyer au Mac (dossier À traiter)</button>
+    <p class="small muted">Dans la feuille de partage, touchez <b>OneDrive</b>, puis choisissez <b>MyFinance › À traiter</b> (OneDrive retient le dossier la fois suivante). <button class="btn-ghost" style="padding:2px 8px" onclick="scanReset()">Tout effacer</button></p>` : ''}
+    <p class="small muted">Une photo n'a pas de texte : le Mac saura la ranger, mais pas y lire des montants. Pour un document dont MyFinance doit lire les chiffres, préférez le PDF d'origine.</p></div>`;
 }
 
 // ---------- Démarrage ----------
