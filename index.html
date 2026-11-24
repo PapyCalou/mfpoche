@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.9.0 du 22/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.9.2 du 24/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -222,6 +222,7 @@ async function afterLoad() {
     if (pickedFresh && prev && data.generatedAt <= prev) notice = { kind: 'bad', text: `⚠️ Ce fichier a été préparé par le Mac le ${dhm(data.generatedAt)} : il n'est pas plus récent que celui déjà ouvert${data.generatedAt < prev ? ' (' + dhm(prev) + ')' : ''}. L'iPhone a reçu une ancienne copie. Ouvrez l'application OneDrive, tirez la liste vers le bas pour l'actualiser, attendez que l'heure du fichier change, puis rouvrez-le ici. Sur le Mac, le bas du menu indique l'heure du dernier fichier écrit (« iPhone à jour »).` };
     if (data.generatedAt > prev) store.set('mf-last-gen', data.generatedAt);
   }
+  { const x = sentStatus(); if (x && (x.st === 'late' || x.st === 'bad') && !(notice && notice.kind === 'bad')) notice = { kind: 'bad', text: sentText(x) }; }
   pickedFresh = false;
   monthSel = new Set((data.months || []).filter(m => !m.done && !m.missing && m.pending > 0).map(m => m.month));
   view = 'month'; render();
@@ -582,6 +583,27 @@ async function buildOut() {
   outCache = { sig, name, text };
   return outCache;
 }
+// ===== MF Poche 1.9.1 : SUIVI DU DERNIER ENVOI (en attente, reçu par le Mac, perdu en route) =====
+// L'iPhone note ce qu'il a envoyé ; le fichier du Mac dit ce qu'il a reçu (applied) et ce qu'il n'a pas pu lire (inboxBad).
+function sentGet() { try { return JSON.parse(store.get('mf-sent') || 'null'); } catch (e) { return null; } }
+function sentMark(name) { store.set('mf-sent', JSON.stringify({ at: new Date().toISOString(), name, ids: queue.map(i => i.id) })); }
+function sentStatus() {
+  const S = sentGet(); if (!S || !S.at || !data || data.example) return null;
+  const applied = new Set(data.applied || []), pend = (S.ids || []).filter(id => !applied.has(id));
+  if (!pend.length) return { st: 'ok', S, at: data.lastReturn && data.lastReturn.at };
+  if ((data.inboxBad || []).includes(S.name)) return { st: 'bad', S, n: pend.length };
+  const late = data.generatedAt && new Date(data.generatedAt).getTime() > new Date(S.at).getTime() + 10 * 60000;
+  return { st: late ? 'late' : 'wait', S, n: pend.length, lost: pend.filter(id => !queue.some(i => i.id === id)).length };
+}
+function sentText(x) {
+  if (!x) return '';
+  if (x.st === 'ok') return `✓ Votre envoi du ${dhm(x.S.at)} a été reçu par le Mac${x.at ? ' le ' + dhm(x.at) : ''}.`;
+  if (x.st === 'bad') return `⚠️ Votre envoi du ${dhm(x.S.at)} est arrivé sur le Mac, mais le Mac n'a pas pu le lire. Sur le Mac, MyFinance explique quoi faire dans « À faire ». Vous pouvez aussi le renvoyer d'ici.`;
+  if (x.st === 'late') return `⚠️ Le Mac n'a pas reçu votre envoi du ${dhm(x.S.at)} : le fichier du Mac que vous venez d'ouvrir est plus récent et ne le contient pas. ${x.lost ? 'La liste a été vidée entre-temps : ' + x.lost + ' élément(s) sont à ressaisir.' : 'Rien n\'est perdu : touchez de nouveau « Envoyer au Mac ».'}`;
+  return `⏳ Envoi du ${dhm(x.S.at)} : en attente de la confirmation du Mac. Elle arrivera quand vous rouvrirez ici un fichier du Mac plus récent.`;
+}
+function sentHtml() { const x = sentStatus(); if (!x) return ''; return `<div class="banner ${x.st === 'ok' ? 'ok' : x.st === 'wait' ? 'info' : 'bad'}" id="sent-status" data-st="${x.st}">${esc(sentText(x))}</div>`; }
+const canRetourQueue = () => !!(data && Array.isArray(data.caps) && data.caps.includes('retourQueue'));
 async function sendToMac() {
   if (!queue.length) return;
   const out = await buildOut();
@@ -590,7 +612,8 @@ async function sendToMac() {
   if (file && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file] });
-      notice = { kind: 'ok', text: "Fichier transmis. S'il est bien dans OneDrive › … › MyFinance › iPhone, le Mac l'intégrera dans les 2 minutes (MyFinance ouvert)." };
+      sentMark(out.name);
+      notice = { kind: 'ok', text: "Fichier transmis. Le Mac l'intégrera dans les 2 minutes (MyFinance ouvert). La liste se videra seule quand le Mac aura confirmé." };
       confirmClear = true; render(); return;
     } catch (e) {
       if (e && e.name === 'AbortError') { notice = { kind: 'info', text: 'Envoi annulé.' }; render(); return; }
@@ -602,7 +625,7 @@ async function sendToMac() {
     const a = document.createElement('a'); a.href = url; a.download = out.name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) {}
-  showFallback = true; confirmClear = true;
+  showFallback = true; confirmClear = true; sentMark(out.name);
   notice = { kind: 'info', text: 'Fichier « ' + out.name + ' » téléchargé (app Fichiers › Téléchargements) : déplacez-le dans OneDrive › … › MyFinance › iPhone. À défaut, copiez le texte ci-dessous dans un fichier de ce nom.' };
   render();
   const t = $('fallback'); if (t) t.value = out.text;
@@ -673,8 +696,10 @@ function viewQueue() {
     <div class="list">${queue.map(i => `<div><span class="name">${i.type === 'use' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">utilisation</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))} · ${(i.lines || []).map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ')}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'installments' ? `<b>${eur(i.total)}</b> en ${(i.items || []).length} fois <span class="chip info">achat en plusieurs fois</span><br><span class="small muted">${esc(i.merchant)} via ${esc(i.org)} · ${esc(accName(i.account))} · du ${dfr(((i.items || [])[0] || {}).date)} au ${dfr(((i.items || [])[(i.items || []).length - 1] || {}).date)}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transit' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)} <span class="chip info">déplacement</span><br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.via))} → ${esc(accName(i.to))}${i.note ? ' · ' + esc(i.note) : ''}</span>` : i.type === 'transfer' ? `<b>${eur(i.amount)}</b> le ${dfr(i.date)}<br><span class="small muted">${esc(accName(i.from))} → ${esc(accName(i.to))}${i.months && i.months.length ? ' · ' + i.months.map(esc).join(', ') : ''}${(i.lines || []).length ? ' · ' + i.lines.map(l => esc(l.name) + ' ' + eur(l.amount)).join(' · ') : ''}${i.note ? ' · ' + esc(i.note) : ''}</span>` : `Provisions de <b>${esc(i.month)}</b> à enregistrer`}</span>
       <button class="btn-ghost btn-danger" style="padding:6px 10px" onclick="removeItem('${esc(i.id)}')" aria-label="Retirer">Retirer</button></div>`).join('') || '<div class="muted">Rien à envoyer. Notez un virement dans « Ce mois ».</div>'}</div>
     <button class="btn-primary" onclick="sendToMac()" ${queue.length ? '' : 'disabled'}>Envoyer au Mac (fichier pour OneDrive)</button>
-    <p class="small muted">Dans la feuille de partage : « Enregistrer dans Fichiers » › Parcourir › OneDrive › MyFinance › <b>iPhone</b>. Le Mac lit ce dossier toutes les 2 minutes quand MyFinance est ouvert.</p>
-    ${confirmClear && queue.length ? `<div class="banner info">Le fichier est bien dans OneDrive ? <button style="padding:6px 10px;margin-left:6px" onclick="clearQueue()">Oui, vider la liste</button></div>` : ''}
+    ${sentHtml()}
+    ${canRetourQueue() ? `<p class="small muted" id="one-tap"><b>Deux dossiers possibles :</b> le Mac reconnaît l'envoi dans MyFinance › <b>iPhone</b> comme dans MyFinance › <b>À traiter</b>. Si « Fichiers » affiche OneDrive en gris, touchez plutôt l'icône <b>OneDrive</b> de la feuille de partage.</p>` : ''}
+    <p class="small muted">${canRetourQueue() ? 'Sinon : ' : 'Dans la feuille de partage : '}« Enregistrer dans Fichiers » › Parcourir › OneDrive › MyFinance › <b>iPhone</b>. Le Mac lit ce dossier toutes les 2 minutes quand MyFinance est ouvert.</p>
+    ${confirmClear && queue.length ? `<div class="banner info">Ne videz pas la liste : elle se videra seule quand le Mac aura reçu l'envoi, et vous pourrez renvoyer si besoin. <button class="btn-ghost" style="padding:4px 8px;margin-left:6px" onclick="clearQueue()">Vider quand même</button></div>` : ''}
     ${showFallback ? `<textarea id="fallback" class="code" readonly>${esc(outCache ? outCache.text : '')}</textarea>
     <button onclick="copyFallback()">Copier le texte</button>` : ''}
   </div>`;
@@ -855,7 +880,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.9.0 du 22/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.9.2 du 24/11/2026</p>`;
 }
 // ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
 // À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
