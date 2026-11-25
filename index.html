@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.10.0 du 24/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.10.1 du 25/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -141,7 +141,7 @@ textarea.code { min-height: 120px }
 const EXAMPLE = { type: 'myfinance-mobile', generatedAt: '2026-10-29T18:00:00Z', example: true,
   accounts: [
     { id: 'a1', name: 'Compte joint', bank: 'BoursoBank', current: true, liquid: true, balance: 3412.55, num: '12345' },
-    { id: 'a2', name: 'LDD Pascal', bank: 'BoursoBank', current: false, liquid: true, balance: 11850, num: '01352' },
+    { id: 'a2', name: 'LDD (exemple)', bank: 'BoursoBank', current: false, liquid: true, balance: 11850, num: '01352' },
     { id: 'a3', name: 'Livret Bourso+', bank: 'BoursoBank', current: false, liquid: true, balance: 8030, num: '04478' }],
   plan: { from: 'a1', to: 'a2', day: 8, total: 830, lines: [{ name: 'Impôts', amount: 120 }, { name: 'Voitures', amount: 125 }, { name: 'Piscine', amount: 200 }, { name: 'Vacances', amount: 185 }, { name: 'Taxe foncière', amount: 200 }] },
   envelopes: [{ id: 'p1', name: 'Impôts', monthly: 120, balance: 1320 }, { id: 'p2', name: 'Voitures', monthly: 125, balance: 940 }, { name: 'Piscine', monthly: 200, balance: 1600 }, { name: 'Vacances', monthly: 185, balance: 2080 }, { name: 'Taxe foncière', monthly: 200, balance: 1500 }],
@@ -426,7 +426,7 @@ async function addMove(ev) {
   render();
 }
 // ===== MF Poche 1.9.0 : ACHAT EN PLUSIEURS FOIS (échéancier saisi ou lu dans le texte d'une capture d'écran) =====
-// Demande de Pascal (22/11/2026) : saisir sur l'iPhone l'échéancier d'un achat payé en plusieurs mensualités (Klarna, PayPal…),
+// Demande de l'utilisateur (22/11/2026) : saisir sur l'iPhone l'échéancier d'un achat payé en plusieurs mensualités (Klarna, PayPal…),
 // à la main ou à partir d'une capture, pour alimenter l'Échéancier de MyFinance. Rien ne quitte l'iPhone : le texte de la capture
 // est copié par l'iPhone lui-même (appui long sur l'image › Copier le texte), puis collé ici.
 const INST_ORGS = ['Klarna', 'PayPal', 'Alma', 'Oney', 'Cofidis', 'Floa', 'Carte bancaire', 'Autre'];
@@ -880,7 +880,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.10.0 du 24/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.10.1 du 25/11/2026</p>`;
 }
 // ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
 // À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
