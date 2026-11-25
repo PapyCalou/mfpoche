@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  MyFinance Poche — application iPhone autonome de MyFinance (version 1.10.1 du 25/11/2026)
+  MyFinance Poche — application iPhone autonome de MyFinance (version 1.11.0 du 25/11/2026)
   ------------------------------------------------------------------------------------
   Rôle : noter sur l'iPhone les virements de provisions faits depuis l'application de la banque (alimentation des
   enveloppes, et depuis la 1.2 utilisation d'une provision : épargne → compte courant, enveloppes débitées),
@@ -105,9 +105,9 @@ input, select, textarea { font: inherit; color: var(--ink); background: var(--pa
 .banner.ok { background: var(--ok-soft); color: var(--ok) }
 .banner.bad { background: var(--bad-soft); color: var(--bad) }
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--card); border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); padding-top: 6px }
-.tabs button { border: 0; background: transparent; padding: 6px 2px; font-size: .74rem; color: var(--muted); display: grid; gap: 2px; justify-items: center; position: relative }
+.tabs button { border: 0; background: transparent; padding: 6px 1px; font-size: .7rem; color: var(--muted); display: grid; gap: 2px; justify-items: center; position: relative }
 .tabs button[aria-selected="true"] { color: var(--accent) }
 .tabs .ico { font-family: var(--display); font-weight: 800; font-size: 1.05rem }
 .tabs .badge { position: absolute; top: 0; right: 22%; background: var(--warn); color: var(--card); border-radius: 999px; font-size: .65rem; padding: 0 5px; font-weight: 700 }
@@ -130,6 +130,7 @@ textarea.code { min-height: 120px }
 </div>
 <nav class="tabs" role="tablist" aria-label="Sections">
   <button role="tab" id="tab-month" aria-selected="true" onclick="go('month')"><span class="ico">€</span>Ce mois</button>
+  <button role="tab" id="tab-agenda" aria-selected="false" onclick="go('agenda')"><span class="ico">▦</span>Agenda<span id="a-badge" class="badge" style="background:var(--bad)" hidden></span></button>
   <button role="tab" id="tab-queue" aria-selected="false" onclick="go('queue')"><span class="ico">↗</span>Envoyer<span id="q-badge" class="badge" hidden></span></button>
   <button role="tab" id="tab-accounts" aria-selected="false" onclick="go('accounts')"><span class="ico">≡</span>Comptes</button>
   <button role="tab" id="tab-bourse" aria-selected="false" onclick="go('bourse')"><span class="ico">↗︎</span>Bourse<span id="b-badge" class="badge" style="background:var(--bad)" hidden></span></button>
@@ -745,6 +746,42 @@ function viewRadar() {
     ${(R.opps || []).length ? `<details class="panel" style="padding:12px"><summary class="small"><b>🟢 Opportunités du jour (${R.opps.length})</b> <span class="muted">· pistes à étudier, pas des achats</span></summary><div class="list" style="margin-top:6px">${R.opps.map(o => `<div style="display:block"><b>${esc(o.symbol)}</b> <span class="small muted">${esc(o.name)} · ${esc(o.src)}</span><div class="small">${o.link ? `<a href="${esc(o.link)}" target="_blank" rel="noopener">${esc(o.title)} ↗</a>` : esc(o.title)}</div>${o.detail ? `<div class="small muted">${esc(o.detail)}</div>` : ''}</div>`).join('')}</div></details>` : ''}
     <p class="small muted">Alertes automatiques à partir de titres d'articles publics : vérifiez avant toute décision. Les ordres se passent dans IBKR Mobile.</p>`;
 }
+// ---------- 1.11.0 : agenda des échéances (préparé par le Mac, dans le fichier chiffré) ----------
+// Échéances programmées, rappels du Pense-bête et dates anniversaires des contrats sur 60 jours. Lecture seule : rien n'est
+// envoyé au calendrier du téléphone, rien ne quitte le fichier chiffré.
+(function () { const t = new Date(), d = n => { const x = new Date(t.getTime() + n * 86400000); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
+  EXAMPLE.agenda = { at: t.toISOString(), from: d(0), to: d(60), days: 60, items: [
+    { date: d(-3), kind: 'rappel', label: 'Importer les relevés des banques (exemple)', late: true },
+    { date: d(2), kind: 'echeance', label: 'Électricité (exemple)', amount: -84.5, account: 'Compte joint (exemple)' },
+    { date: d(5), kind: 'virement', label: 'Virement mensuel des provisions (exemple)', amount: 600, account: 'Compte joint (exemple)', to: 'Livret (exemple)' },
+    { date: d(12), kind: 'echeance', label: 'Pension (exemple)', amount: 1850, account: 'Compte joint (exemple)' },
+    { date: d(40), kind: 'contrat', label: 'Date anniversaire : assurance habitation (exemple)' }] }; })();
+const AG_ICO = { rappel: '🔔', contrat: '📄', virement: '⇄', echeance: '€' };
+function agToday() { const x = new Date(); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+function agPlus(d, n) { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+function agDay(d) { let w = ''; try { w = new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', ''); } catch (e) {} return (w ? w + ' ' : '') + d.slice(8, 10) + '/' + d.slice(5, 7); }
+function agLate() { const A = data && data.agenda, t = agToday(); return A && Array.isArray(A.items) ? A.items.filter(i => i.kind === 'rappel' && i.date < t).length : 0; }
+function agGroups(A) {
+  const t = agToday(), w = agPlus(t, 7), m = agPlus(t, 30);
+  const G = [['late', 'En retard', []], ['today', 'Aujourd\'hui', []], ['week', 'Dans les 7 jours', []], ['month', 'Dans les 30 jours', []], ['later', 'Plus tard', []]];
+  (A.items || []).forEach(i => { const k = i.date < t ? (i.kind === 'rappel' ? 0 : -1) : i.date === t ? 1 : i.date <= w ? 2 : i.date <= m ? 3 : 4; if (k >= 0) G[k][2].push(i); });
+  return G.filter(g => g[2].length);
+}
+function viewAgenda() {
+  if (!data) return viewFile();
+  const A = data.agenda;
+  if (!A || !Array.isArray(A.items)) return `<div class="panel"><h2>Agenda</h2><p class="small">Le fichier du Mac ne contient pas encore l'agenda. Il faut MyFinance version 13000 ou plus sur le Mac : ouvrez MyFinance, puis rouvrez ici le fichier (onglet « Fichier »).</p></div>`;
+  const t = agToday(), m = agPlus(t, 30), in30 = A.items.filter(i => i.kind === 'echeance' && i.date >= t && i.date <= m);
+  const out = in30.filter(i => i.amount < 0).reduce((s, i) => s + i.amount, 0), inn = in30.filter(i => i.amount > 0).reduce((s, i) => s + i.amount, 0);
+  const line = i => `<div style="display:block" data-ag="${esc(i.kind)}"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span class="name"><span aria-hidden="true">${AG_ICO[i.kind] || '•'}</span> <b>${esc(agDay(i.date))}</b> · ${esc(i.label)}</span>${i.amount != null ? `<span class="money" style="color:${i.kind === 'virement' ? 'inherit' : i.amount >= 0 ? 'var(--ok)' : 'inherit'};white-space:nowrap">${i.kind === 'virement' ? '' : i.amount >= 0 ? '+' : ''}${eur(i.amount)}${i.variable ? ' ≈' : ''}</span>` : ''}</div>${i.account || i.late ? `<div class="small muted">${i.late ? 'rappel en retard' : ''}${i.account ? esc(i.account) + (i.to ? ' → ' + esc(i.to) : '') : ''}</div>` : ''}</div>`;
+  const G = agGroups(A);
+  return `<div class="panel" id="agenda-panel"><h2>🗓 Agenda</h2>
+    <p class="small muted">Du ${dfr(A.from)} au ${dfr(A.to)} · préparé par le Mac le ${dhm(A.at)}.</p>
+    <div class="list" style="margin-top:8px"><div><span class="name">Sorties prévues sur 30 jours</span><span class="money">${eur(out)}</span></div><div><span class="name">Entrées prévues sur 30 jours</span><span class="money" style="color:var(--ok)">+${eur(inn)}</span></div></div>
+    <p class="small muted" style="margin-top:4px">Échéances programmées seulement, sans les virements entre vos comptes. « ≈ » : montant variable.</p></div>
+    ${G.length ? G.map(g => `<div class="panel" data-agg="${g[0]}"><h2 style="${g[0] === 'late' ? 'color:var(--bad)' : ''}">${g[1]} <span class="small muted">(${g[2].length})</span></h2><div class="list">${g[2].map(line).join('')}</div></div>`).join('') : '<div class="panel"><p class="small">Rien de prévu sur cette période.</p></div>'}
+    <p class="small muted" style="padding:0 4px">🔔 rappel du Pense-bête · € échéance · ⇄ virement entre vos comptes · 📄 contrat. Pour corriger une ligne : sur le Mac, dans l'Échéancier ou le Pense-bête.</p>`;
+}
 // ---------- Synthèse de la semaine (préparée par le Mac) ----------
 function viewWeek() {
   const W = data && data.weekly;
@@ -880,7 +917,7 @@ function viewFile() {
   ${store.get('mf-mobile-file') || store.get('mf-mobile-queue') || bioInfo() ? (confirmForget
     ? `<div class="banner bad">Effacer de cet iPhone le fichier, Face ID et la liste à envoyer${queue.length ? ` (<b>${queue.length} élément(s) non envoyé(s)</b>)` : ''} ? <div class="row" style="margin-top:8px"><button class="btn-ghost" onclick="confirmForget=false;render()">Annuler</button><button class="btn-danger" onclick="forgetAll()">Oui, tout effacer</button></div></div>`
     : `<button class="btn-ghost btn-danger" onclick="forgetAll()">Effacer mes données de cet iPhone</button>`) : ''}
-  <p class="version">MyFinance Poche · version 1.10.1 du 25/11/2026</p>`;
+  <p class="version">MyFinance Poche · version 1.11.0 du 25/11/2026</p>`;
 }
 // ---------- 1.7.0 : montants floutés par défaut dans « Comptes » et « Bourse » (discrétion d'écran, pas une protection) ----------
 // À chaque ouverture, les montants sont floutés ; le bouton 👁 du haut, ou un appui sur un montant flouté, les affiche partout.
@@ -901,10 +938,11 @@ function render() {
   if (data && data.example) { chip.className = 'chip warn'; chip.textContent = 'Exemple'; }
   else if (data) { chip.className = 'chip ok'; chip.textContent = 'Données du ' + dhm(data.generatedAt).replace(/\/\d{4} à/, ' à'); }
   else { chip.className = 'chip info'; chip.textContent = encrypted ? 'Verrouillé' : 'Aucun fichier'; }
-  ['month', 'queue', 'accounts', 'bourse', 'file'].forEach(v => $('tab-' + v).setAttribute('aria-selected', String(v === view)));
+  ['month', 'agenda', 'queue', 'accounts', 'bourse', 'file'].forEach(v => $('tab-' + v).setAttribute('aria-selected', String(v === view)));
+  const ab = $('a-badge'), na = data && !data.example ? agLate() : 0; ab.hidden = !na; ab.textContent = na;
   const qb = $('q-badge'); qb.hidden = !queue.length; qb.textContent = queue.length;
   const bb = $('b-badge'), nb = data && !data.example ? radarOpen().length : 0; bb.hidden = !nb; bb.textContent = nb;
-  const body = view === 'queue' ? viewQueue() : view === 'accounts' ? viewAccounts() : view === 'bourse' ? viewBourse() : view === 'file' ? viewFile() : viewMonth();
+  const body = view === 'agenda' ? viewAgenda() : view === 'queue' ? viewQueue() : view === 'accounts' ? viewAccounts() : view === 'bourse' ? viewBourse() : view === 'file' ? viewFile() : viewMonth();
   $('view').innerHTML = (data && data.example ? `<div class="banner example">Exemple : ces chiffres sont fictifs. Ouvrez votre fichier dans l'onglet « Fichier ».</div>` : '')
     + (notice ? `<div class="banner ${notice.kind}" role="status">${esc(notice.text)}</div>` : '') + body;
   blurMark(); blurPaint();
